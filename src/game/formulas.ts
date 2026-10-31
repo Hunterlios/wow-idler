@@ -1,0 +1,166 @@
+// Wzory: tabela doświadczenia z vanilli + uproszczone statystyki do idlera (talenty, formy, buffy).
+import { classById, type Ability, type BuffFx, type Resource, type School } from '../data/classes'
+import { raceById, type Stats } from '../data/races'
+import { talentFx, talentGrants } from '../data/talents'
+import type { Hero } from './types'
+
+export const MAX_LEVEL = 60
+
+// Vanilla: XP = round((8*CL + Diff(CL)) * MXP(CL), do setek), MXP = 45 + 5*CL
+const diff = (l: number) => (l <= 28 ? 0 : l === 29 ? 1 : l === 30 ? 3 : l === 31 ? 6 : 5 * (l - 30))
+export const xpToNext = (l: number) => (l >= MAX_LEVEL ? 0 : Math.round(((8 * l + diff(l)) * (45 + 5 * l)) / 100) * 100)
+
+const zd = (l: number) => (l < 8 ? 5 : l < 10 ? 6 : l < 12 ? 7 : l < 16 ? 8 : l < 20 ? 9 : l < 30 ? 11 : l < 40 ? 12 : l < 45 ? 13 : l < 50 ? 14 : l < 55 ? 15 : 16)
+export const grayLevel = (l: number) => (l <= 5 ? 0 : l <= 39 ? l - Math.floor(l / 10) - 5 : l - Math.floor(l / 5) - 1)
+export function mobXp(mobLvl: number, heroLvl: number) {
+  if (heroLvl >= MAX_LEVEL) return 0
+  const base = 45 + 5 * mobLvl
+  if (mobLvl <= grayLevel(heroLvl)) return 0
+  if (mobLvl >= heroLvl) return Math.round(base * (1 + 0.05 * Math.min(4, mobLvl - heroLvl)))
+  return Math.max(1, Math.round(base * (1 - (heroLvl - mobLvl) / zd(heroLvl))))
+}
+
+export const basePower = (l: number) => 9 + 6.5 * l
+
+export function mobStats(lvl: number) {
+  return { hp: Math.round(30 + 14 * lvl + 0.95 * lvl * lvl), dmg: 1.5 + 1.25 * lvl + 0.022 * lvl * lvl, speed: 2 }
+}
+
+// ---------------------------------------------------------------- dostępne umiejętności
+export function grants(h: Hero) { return talentGrants(h.cls, h.talents ?? {}) }
+export function knows(h: Hero, a: Ability, g = grants(h)) {
+  return a.talent ? g.has(a.id) : (h.trained[a.id] ?? 0) > 0
+}
+export function formOk(h: Hero, a: Ability) {
+  if (h.cls !== 'druid' || !a.form || a.kind === 'form') return true
+  if (a.form === 'caster') return h.form === 'caster' || h.form === 'moonkin'
+  return a.form === h.form
+}
+export function resourceOf(h: Hero): Resource {
+  if (h.cls === 'druid') return h.form === 'bear' ? 'rage' : h.form === 'cat' ? 'energy' : 'mana'
+  return classById(h.cls).resource
+}
+export function styleOf(h: Hero): 'melee' | 'ranged' | 'caster' {
+  if (h.cls === 'druid' && (h.form === 'bear' || h.form === 'cat')) return 'melee'
+  return classById(h.cls).style
+}
+// pasywne buffy aktywne teraz: wytrenowane, niewyłączone, pasujące do formy (+ czasowe)
+export function activeBuffs(h: Hero, g = grants(h)): { a: Ability; fx: BuffFx; scale: number }[] {
+  const out: { a: Ability; fx: BuffFx; scale: number }[] = []
+  for (const a of classById(h.cls).abilities) {
+    if (a.kind === 'buff' && a.buff && knows(h, a, g) && !h.disabled?.[a.id] && formOk(h, a)) {
+      const rank = a.talent ? h.level : h.trained[a.id] ?? h.level
+      out.push({ a, fx: a.buff, scale: 1 + rank / 12 })
+    }
+    if (a.kind === 'cooldown' && a.buff && (h.temp?.[a.id] ?? 0) > 0) out.push({ a, fx: a.buff, scale: 1 })
+  }
+  return out
+}
+
+export type Mods = Record<string, number>
+
+export type Derived = Stats & {
+  maxHp: number
+  maxRes: number
+  res: Resource
+  ap: number
+  armor: number
+  crit: number
+  spellCrit: number
+  dodge: number
+  weaponDps: number
+  weaponSpeed: number
+  spellMult: number
+  haste: number
+  m: Mods // talenty + buffy: dmg, meleeDmg, spellDmg, school:*, ab:*, heal, cost, pet, regen, resGen, critDmg, dot, aoe, shield, dr, lifesteal, castRegen, instant, energy, noPet, shadow
+  dr: (mobLvl: number) => number
+}
+
+const FLAT_SCALED = new Set(['ap', 'sta', 'int', 'spi', 'all'])
+
+export function derive(h: Hero): Derived {
+  const r = raceById(h.race)
+  const c = classById(h.cls)
+  const L = h.level
+  const g = grants(h)
+  const tf = talentFx(h.cls, h.talents ?? {})
+  const m: Mods = { ...tf }
+  const flat = { ap: 0, sta: 0, int: 0, spi: 0, all: 0 }
+  let armorPct = tf.armor ?? 0
+  for (const { fx, scale } of activeBuffs(h, g)) {
+    for (const [k, v] of Object.entries(fx)) {
+      if (v == null) continue
+      if (FLAT_SCALED.has(k)) flat[k as keyof typeof flat] += v * scale
+      else if (k === 'armor') armorPct += v
+      else if (k === 'shadow') m['school:shadow'] = (m['school:shadow'] ?? 0) + v
+      else m[k] = (m[k] ?? 0) + v
+    }
+  }
+  const s: Stats = { str: 0, agi: 0, sta: 0, int: 0, spi: 0 }
+  for (const k of Object.keys(s) as (keyof Stats)[]) s[k] = r.base[k] + c.bonus[k] + c.growth[k] * (L - 1) + flat.all
+  s.sta += flat.sta
+  s.int += flat.int
+  s.spi += flat.spi
+  let gearArmor = 0
+  let weaponDps = 1 + 0.35 * L
+  let weaponSpeed = c.style === 'ranged' ? 2.8 : 2.4
+  for (const it of Object.values(h.equip)) {
+    if (!it) continue
+    for (const [k, v] of Object.entries(it.stats ?? {})) s[k as keyof Stats] += v ?? 0
+    gearArmor += it.armor ?? 0
+  }
+  const wpn = c.id === 'hunter' ? h.equip.ranged ?? h.equip.mainhand : h.equip.mainhand
+  if (wpn?.dps) { weaponDps = wpn.dps; weaponSpeed = wpn.speed ?? 2.4 }
+  // formy druida
+  const form = h.cls === 'druid' ? h.form : 'caster'
+  if (form === 'bear') { weaponDps = 1.5 + 0.62 * L; weaponSpeed = 2.5; armorPct += 1.8; s.sta *= 1.25 }
+  if (form === 'cat') { weaponDps = 1.5 + 0.7 * L; weaponSpeed = 1.0; m.crit = (m.crit ?? 0) + 0.03 }
+  if (form === 'moonkin') { armorPct += 3; m.spellCrit = (m.spellCrit ?? 0) + 0.03 }
+
+  if (r.mods.spiPct) s.spi *= 1 + r.mods.spiPct
+  if (r.mods.intPct) s.int *= 1 + r.mods.intPct
+  const all = tf.allstat ?? 0
+  for (const k of Object.keys(s) as (keyof Stats)[]) s[k] = Math.round(s[k] * (1 + all + (tf[k] ?? 0)))
+
+  let maxHp = c.hp[0] + c.hp[1] * (L - 1) + Math.min(20, s.sta) + 10 * Math.max(0, s.sta - 20)
+  maxHp = Math.round(maxHp * (1 + (L / 60) * 0.7) * (1 + (r.mods.hpPct ?? 0) + (tf.hp ?? 0)))
+  const res = resourceOf(h)
+  const maxRes = res === 'mana' && c.mana ? Math.round(c.mana[0] + c.mana[1] * (L - 1) + Math.min(20, s.int) + 15 * Math.max(0, s.int - 20)) : 100
+
+  let ap = c.id === 'hunter' ? s.agi * 2 + L * 2 - 10 : c.id === 'rogue' || form === 'cat' ? s.str + s.agi + L * 2 - 20 : s.str * 2 + L * 3 - 20
+  if (form === 'bear' || form === 'cat') ap += L * 3
+  ap += flat.ap
+  ap *= 1 + (tf.ap ?? 0)
+  if ((h.buffs.bloodfury ?? 0) > 0) ap *= 1.25
+  const armor = Math.round((gearArmor + s.agi * 2) * (1 + armorPct))
+  const crit = 0.05 + s.agi / (c.id === 'rogue' || c.id === 'hunter' || form === 'cat' ? 29 : 20) / 100 + (m.crit ?? 0) + (h.race === 'human' ? 0.01 : 0)
+  const spellCrit = 0.01 + s.int / 60 / 100 + (m.spellCrit ?? 0)
+  const dodge = 0.03 + s.agi / 20 / 100 + (r.mods.dodge ?? 0) + (m.dodge ?? 0)
+  const primary = c.style === 'caster' || c.id === 'priest' ? s.int + s.spi * 0.3 : c.id === 'shaman' || c.id === 'paladin' ? s.int * 0.5 + s.str * 0.5 : s.agi
+  const spellMult = 1 + primary / 260
+  const haste = 1 + (m.haste ?? 0) + ((h.buffs.berserking ?? 0) > 0 ? 0.15 : 0)
+  const stoneform = (h.buffs.stoneform ?? 0) > 0 ? 0.2 : 0
+  const extraDr = Math.min(0.4, (m.dr ?? 0) + stoneform)
+  const dr = (mobLvl: number) => Math.min(0.8, armor / (armor + 400 + 85 * mobLvl) + extraDr)
+  return { ...s, maxHp, maxRes, res, ap: Math.max(0, Math.round(ap)), armor, crit, spellCrit, dodge, weaponDps, weaponSpeed, spellMult, haste, m, dr }
+}
+
+// Mnożnik obrażeń/leczenia umiejętności z talentów i buffów
+export function dmgMult(d: Derived, a: { id?: string; school?: School; aoe?: boolean; kind?: string } | null, phys: boolean) {
+  const m = d.m
+  let x = 1 + (m.dmg ?? 0) + (phys ? m.meleeDmg ?? 0 : m.spellDmg ?? 0)
+  if (a?.school) x += m[`school:${a.school}`] ?? 0
+  if (a?.id) x += m[`ab:${a.id}`] ?? 0
+  if (a?.kind === 'dot') x += m.dot ?? 0
+  if (a?.aoe) x += m.aoe ?? 0
+  return x
+}
+
+export const rageConv = (l: number) => 0.0091107836 * l * l + 3.225598133 * l + 4.2652911
+
+export function formatMoney(copper: number) {
+  const g = Math.floor(copper / 10000)
+  const s = Math.floor((copper % 10000) / 100)
+  const c = Math.floor(copper % 100)
+  return { g, s, c }
+}

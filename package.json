@@ -1,0 +1,49 @@
+{
+  "name": "azeroth-idle",
+  "productName": "Azeroth Idle",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Idle RPG w klimacie WoW Classic, który siedzi na dole ekranu i gra się sam.",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "app": "vite build && electron .",
+    "app:dev": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on tcp:5173 && cross-env DEV_URL=http://localhost:5173 electron .\"",
+    "dist": "vite build && electron-builder --win portable",
+    "balance": "tsx scripts/balance.ts 24"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.0.0",
+    "cross-env": "^7.0.3",
+    "electron": "^38.8.6",
+    "electron-builder": "^26.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "wait-on": "^8.0.0"
+  },
+  "build": {
+    "appId": "dev.kuba.azeroth-idle",
+    "productName": "Azeroth Idle",
+    "files": [
+      "dist/**",
+      "electron/**"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "public/icon.png"
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}
