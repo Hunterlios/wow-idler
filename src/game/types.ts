@@ -70,6 +70,7 @@ export type MobState = {
   dist: number // ile sekund wróg jeszcze podchodzi (zwarcie dopiero przy 0)
   dist0: number
   cc: number // jeden z grupy obezwładniony (Polymorph, Freezing Trap)
+  slow: number // spowolnienie (Frost Shock): wolniej podchodzi
 }
 
 export type TotemState = { id: string; el: string; left: number; tickIn: number }
@@ -107,7 +108,7 @@ export type Hero = {
   heroDodged: boolean
   cds: Record<string, number>
   buffs: Record<string, number>
-  casting: { id: string; left: number; total: number } | null
+  casting: { id: string; left: number; total: number; mult?: number; pb?: number } | null
   hot: { perTick: number; left: number; tickIn: number } | null
   shield: number
   gcd: number
@@ -157,12 +158,13 @@ export type GameEvent =
   | { t: 'spawn'; mob: string; lvl: number; boss?: 'mini' | 'zone' }
   | { t: 'racial'; name: string }
   | { t: 'totem'; name: string }
+  | { t: 'interrupt'; ability: string }
 
 export type LogLine = { time: number; text: string; color?: string }
 
 export type Totals = { kills: number; deaths: number; copper: number; xp: number; items: number; quests: number; played: number; bosses: number }
 
-export type Trip = { kind: 'walk' | 'ship' | 'zeppelin'; label: string; total: number }
+export type Trip = { kind: 'walk' | 'ship' | 'zeppelin'; label: string; total: number; from?: string; to?: string; form?: string }
 
 export type GameState = {
   v: 4

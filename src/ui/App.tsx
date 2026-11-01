@@ -8,6 +8,7 @@ import type { Scene } from '../render/scene'
 import { CharacterCreate } from './CharacterCreate'
 import { Strip, type PanelId } from './Strip'
 import { DragGhost, setDropHandler } from './dnd'
+import { gameSpeed } from '../game/admin'
 import { dropItem } from './itemActions'
 import { BagsPanel, CharacterPanel, CityPanel, LogPanel, QuestLog, Settings, Spellbook, TalentsPanel, fmtTime } from './Panels'
 import { onLayout, uiScale } from './layout'
@@ -77,7 +78,7 @@ export function App() {
       if (real > 30) {
         const sum = simulateOffline(s, real)
         if (real > 120) setOffline(sum)
-      } else if (real > 0) advance(s, real * s.speed, emit)
+      } else if (real > 0) advance(s, real * gameSpeed(s.speed), emit)
       if (draw) sceneRef.current?.draw(s, Math.min(real, 0.1))
     }
     const frame = (t: number) => { pump(t, true); raf = requestAnimationFrame(frame) }
@@ -183,7 +184,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — wersja przeglądarkowa (demo 0.4)</b>
+        <b>Azeroth Idle — wersja przeglądarkowa (demo 0.5)</b>
         <span>W aplikacji (Electron) tło jest przezroczyste, a pasek siedzi nad paskiem zadań Windows.</span>
         <span>Skróty: C postać · B torby · L zadania · P umiejętności · N talenty · M mapa · Esc zamyka okna</span>
       </div>

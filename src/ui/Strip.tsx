@@ -3,7 +3,7 @@ import { classById } from '../data/classes'
 import { raceById } from '../data/races'
 import { zoneById } from '../data/zones'
 import { talentPoints, spentTotal } from '../data/talents'
-import { xpToNext, MAX_LEVEL, grants, active } from '../game/formulas'
+import { xpToNext, MAX_LEVEL, grants, active, styleOf } from '../game/formulas'
 import { stats, activePet, bossState, costOf, cdOf, learnableCount } from '../game/sim'
 import { subOf, subsOf, townOf, capitalOf, zonePct } from '../game/world'
 import { capacity, usedSlots } from '../game/inventory'
@@ -60,7 +60,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
     : s.phase === 'rest' ? (h.eating && (h.eating.hp || h.eating.mana) && h.eating.left > 0 ? (h.eating.hp && h.eating.mana ? 'Je i pije...' : h.eating.mana ? 'Pije...' : 'Je...') : 'Odpoczywa (brak jedzenia)...')
     : s.phase === 'fight' && s.mob && s.mob.dist > 0 ? `${s.mob.name} nadchodzi...`
     : s.phase === 'dead' ? 'Duch'
-    : s.phase === 'travel' ? (s.trip?.label || `Podróż: ${sub.name}`)
+    : s.phase === 'travel' ? `${s.trip?.form ? `${s.trip.form} · ` : ''}${s.trip?.to ?? sub.name} · ${Math.ceil(s.phaseT)} s`
     : 'Szuka celu...'
   const cast = h.casting
   const pet = activePet(h)
@@ -113,8 +113,12 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
           <Bar value={h.res} max={d.maxRes} color={RES_COLOR[d.res]} label={d.res === 'mana' ? `${Math.floor(h.res)} / ${d.maxRes}` : `${Math.floor(h.res)}`} height={11} />
           {cast ? (
             <Bar className="castbar" value={cast.total - cast.left} max={cast.total} color="linear-gradient(#ffd24a,#b08000)" label={c.abilities.find((a) => a.id === cast.id)?.name} height={10} />
-          ) : (
+          ) : null}
+          {!cast && (
             <div className="phase">{phaseText}{h.cp > 0 && <span className="cp">{'●'.repeat(h.cp)}</span>}{(h.stacks.mw ?? 0) > 0 && <span className="cp mw">{'◆'.repeat(h.stacks.mw)}</span>}{(h.stacks.ab ?? 0) > 0 && <span className="cp ab">{'✦'.repeat(h.stacks.ab)}</span>}{pet && <span className="pet"> · {pet.name}</span>}{h.wellFed && <span className="wellfed" title={`${h.wellFed.name}: Well Fed`}> · 🍖</span>}</div>
+          )}
+          {s.phase === 'fight' && s.mob && styleOf(h) !== 'caster' && (styleOf(h) === 'ranged' || s.mob.dist <= 0) && (
+            <Bar className="swingbar" value={Math.max(0, d.weaponSpeed - Math.max(0, h.swing))} max={d.weaponSpeed} color="linear-gradient(#e0e0e0,#808080)" height={4} />
           )}
         </div>
       </div>
@@ -148,16 +152,16 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
 
       <div className="actionbar">
         {bar.map((a, i) => {
-          const cd = h.cds[a.id] > 0 && a.cd ? Math.min(1, h.cds[a.id] / cdOf(a, d)) : 0
+          const tot = h.totems.find((t) => t.id === a.id)
+          const cd = tot ? Math.min(1, tot.left / 300) : h.cds[a.id] > 0 && a.cd ? Math.min(1, h.cds[a.id] / cdOf(a, d)) : 0
           const passive = a.kind === 'buff' || a.kind === 'proc'
           const oom = !passive && a.kind !== 'lifetap' && h.res < costOf(h, a, d)
           const on = (h.temp[a.id] ?? 0) > 0 || h.totems.some((t) => t.id === a.id)
           return (
             <Hover key={a.id} anchor="above" className={`abtn ${passive ? 'passive' : ''} ${oom ? 'oom' : ''} ${cast?.id === a.id || on ? 'casting' : ''}`}
-              tip={<Tip title={a.name}><div className="tt-dim">{a.cost ? `${costOf(h, a, d)} ${d.res === 'mana' ? 'Mana' : d.res === 'rage' ? 'Rage' : 'Energy'}` : passive ? 'Pasywna' : 'Bez kosztu'}{a.cd ? ` · CD ${cdOf(a, d)} s` : ''}{a.cast ? ` · ${a.cast} s` : ' · natychmiast'}</div><div>{a.desc}</div><div className="tt-dim">Wyłączysz ją w księdze umiejętności (P).</div></Tip>}>
+              tip={<Tip title={a.name}><div className="tt-dim">{a.cost ? `${costOf(h, a, d)} ${d.res === 'mana' ? 'Mana' : d.res === 'rage' ? 'Rage' : 'Energy'}` : passive ? 'Pasywna' : 'Bez kosztu'}{a.cd ? ` · CD ${cdOf(a, d)} s` : ''}{tot ? ` · totem stoi jeszcze ${Math.ceil(tot.left)} s` : ''}{a.cast ? ` · ${a.cast} s` : ' · natychmiast'}</div><div>{a.desc}</div><div className="tt-dim">Wyłączysz ją w księdze umiejętności (P).</div></Tip>}>
               <img src={abilityIcon(a, h.cls)} alt="" draggable={false} />
               {cd > 0 && <div className="cd" style={{ background: `conic-gradient(rgba(0,0,0,.7) ${cd * 360}deg, transparent 0)` }} />}
-              {i < 12 && <span className="hk">{i < 9 ? i + 1 : i === 9 ? 0 : i === 10 ? '-' : '='}</span>}
             </Hover>
           )
         })}

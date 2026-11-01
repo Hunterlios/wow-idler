@@ -143,7 +143,7 @@ export function derive(h: Hero): Derived {
   if (wpn?.dps) { weaponDps = wpn.dps; weaponSpeed = wpn.speed ?? 2.4 }
   // formy druida
   const form = h.cls === 'druid' ? h.form : 'caster'
-  if (form === 'bear') { weaponDps = 1.5 + 0.62 * L; weaponSpeed = 2.5; armorPct += 1.8; s.sta *= 1.25 }
+  if (form === 'bear') { weaponDps = 1.5 + 0.78 * L; weaponSpeed = 2.5; armorPct += 1.8; s.sta *= 1.25 }
   if (form === 'cat') { weaponDps = 1.5 + 0.7 * L; weaponSpeed = 1.0; m.crit = (m.crit ?? 0) + 0.03 }
   if (form === 'moonkin') { armorPct += 3; m.spellCrit = (m.spellCrit ?? 0) + 0.03 }
 

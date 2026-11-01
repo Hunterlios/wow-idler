@@ -8,6 +8,7 @@ import { raceById } from '../data/races'
 import { zoneById } from '../data/zones'
 import { stats, costOf, cdOf } from '../game/sim'
 import { exportSave, importSave } from '../game/save'
+import { isAdmin, unlockAdmin, lockAdmin } from '../game/admin'
 import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, type EquipSlot, type GameState, type Quest } from '../game/types'
 import { segmentsOf, equipFromInv, unequip, sortBags, BACKPACK, capacity, usedSlots } from '../game/inventory'
 import { rightClickInv, rightClickEquip } from './itemActions'
@@ -84,7 +85,6 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
       <Hover className="weapon-skills" tip={<div className="tooltip-body"><div className="tt-name">Umiejętności broni</div><div>{known.join(', ')}</div><div className="tt-dim">Kolejnych typów nauczysz się u Weapon Mastera w stolicy.</div></div>}>
         <span className="dim small">Broń: {known.join(', ')}</span>
       </Hover>
-      <label className="auto-eq"><input type="checkbox" checked={s.autoEquip} onChange={(e) => { s.autoEquip = e.target.checked; bump() }} /> Automatycznie zakładaj lepsze przedmioty z łupu</label>
     </Frame>
   )
 }
@@ -131,8 +131,10 @@ function statTips(h: GameState['hero'], d: ReturnType<typeof stats>): Record<str
 // ---------------------------------------------------------------- Torby
 export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: () => void } & Act) {
   const h = s.hero
-  const [off, setOff] = useState(layout().frames.bags ?? { dx: 0, dy: 0 })
-  const offRef = { current: off }
+  // każda torba ma własne przesunięcie (domyślnie stos przy prawej krawędzi), zapisywane w układzie
+  const key = (i: number) => `bag${i}`
+  const [offs, setOffs] = useState<Record<string, { dx: number; dy: number }>>(() => Object.fromEntries([0, 1, 2, 3, 4].map((i) => [key(i), layout().frames[key(i)] ?? { dx: 0, dy: 0 }])))
+  const offRef = { current: offs }
   const segs = segmentsOf(h)
   const vendor = s.where === 'capital'
   let base = 0
@@ -141,9 +143,18 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
     base += i === 0 ? BACKPACK : h.bags[i - 1]?.bagSize ?? 0
     if (i > 0 && !h.bags[i - 1]) return null
     const name = i === 0 ? 'Backpack' : h.bags[i - 1]!.name
+    const o = offs[key(i)] ?? { dx: 0, dy: 0 }
     return (
-      <div key={i} className="bagwin" data-solid>
-        <div className="bagwin-head" onPointerDown={(e) => { if ((e.target as HTMLElement).closest('button')) return; const base = offRef.current; startDrag(e, (dx, dy) => setOff({ dx: base.dx + dx / uiScale(), dy: base.dy + dy / uiScale() }), () => saveLayout({ frames: { ...layout().frames, bags: offRef.current } })) }}>
+      <div key={i} className="bagwin" data-solid style={{ transform: `translate(${o.dx}px, ${o.dy}px)` }}>
+        <div className="bagwin-head" title="Przeciągnij, żeby przesunąć tę torbę (dwuklik: wróć na miejsce)"
+          onDoubleClick={() => { const n = { ...offRef.current, [key(i)]: { dx: 0, dy: 0 } }; setOffs(n); saveLayout({ frames: { ...layout().frames, [key(i)]: { dx: 0, dy: 0 } } }) }}
+          onPointerDown={(e) => {
+            if ((e.target as HTMLElement).closest('button')) return
+            const b0 = offRef.current[key(i)] ?? { dx: 0, dy: 0 }
+            let last = b0
+            startDrag(e, (dx, dy) => { last = { dx: b0.dx + dx / uiScale(), dy: b0.dy + dy / uiScale() }; setOffs((cur) => ({ ...cur, [key(i)]: last })) },
+              () => saveLayout({ frames: { ...layout().frames, [key(i)]: last } }))
+          }}>
           <img src={itemIcon(i === 0 ? { id: -1, name: 'Backpack', rarity: 1, ilvl: 1, value: 0, bagSize: 16 } : h.bags[i - 1]!)} alt="" draggable={false} /><span>{name}</span>
           {i === 0 && <button className="wbtn small" title="Sortuj torby" onClick={() => { sortBags(h); bump() }}>Sortuj</button>}
           {i === 0 && <button className="wclose" onClick={onClose}>✕</button>}
@@ -165,7 +176,7 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
       </div>
     )
   })
-  return <div className="bags-stack" style={{ transform: `translate(${off.dx}px, ${off.dy}px)` }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.bagwin-head')) { setOff({ dx: 0, dy: 0 }); saveLayout({ frames: { ...layout().frames, bags: { dx: 0, dy: 0 } } }) } }}>{blocks}</div>
+  return <div className="bags-stack">{blocks}</div>
 }
 
 // ---------------------------------------------------------------- Dziennik zadań
@@ -495,8 +506,8 @@ export function TalentsPanel({ s, onClose, bump, toast }: { s: GameState; onClos
                       const ab = t.grants ? c.abilities.find((a) => a.id === t.grants) : undefined
                       const icon = ab ? abilityIcon(ab, h.cls) : talentIcon(t.fx[0]?.[0], tree)
                       return (
-                        <Hover key={col} className={`tal ${rank ? 'has' : ''} ${can ? 'can' : ''} ${rank >= t.max ? 'max' : ''} ${t.forever ? 'forever' : ''}`} onClick={() => { if (learnTalent(s, t.id)) bump() }}
-                          tip={<div className="tooltip-body"><div className="tt-name">{t.name}</div><div className="tt-dim">Ranga {rank}/{t.max}{tier ? ` · wymaga ${tier * 5} pkt w ${name}` : ''}</div><div>{t.desc}</div>{t.forever && <div className="tt-forever">Nowe / zmienione w WoW Forever</div>}{ab && <div className="tt-dim">Daje umiejętność: {ab.name}</div>}{can && <div style={{ color: '#40ff40' }}>Kliknij, aby nauczyć</div>}</div>}>
+                        <Hover key={col} className={`tal ${rank ? 'has' : ''} ${can ? 'can' : ''} ${rank >= t.max ? 'max' : ''}`} onClick={() => { if (learnTalent(s, t.id)) bump() }}
+                          tip={<div className="tooltip-body"><div className="tt-name">{t.name}</div><div className="tt-dim">Ranga {rank}/{t.max}{tier ? ` · wymaga ${tier * 5} pkt w ${name}` : ''}</div><div>{t.desc}</div>{ab && <div className="tt-dim">Daje umiejętność: {ab.name}</div>}{can && <div style={{ color: '#40ff40' }}>Kliknij, aby nauczyć</div>}</div>}>
                           <img src={icon} alt="" draggable={false} />
                           <span className="tal-rank">{rank}/{t.max}</span>
                         </Hover>
@@ -534,13 +545,30 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
   const [txt, setTxt] = useState('')
   const [msg, setMsg] = useState('')
   const [auto, setAuto] = useState(() => native?.getAutostart() ?? false)
+  const [pw, setPw] = useState('')
+  const [displays, setDisplays] = useState(() => native?.getDisplays?.() ?? [])
   return (
     <Frame id="settings" title="Ustawienia" onClose={onClose} className="settings-frame" icon={menuIcon('gear')}>
       <div className="settings">
-        <div className="set-row">
-          <span>Prędkość gry (test):</span>
-          {[1, 2, 5, 20].map((n) => <button key={n} className={`wbtn ${s.speed === n ? 'on' : ''}`} onClick={() => { s.speed = n; bump() }}>×{n}</button>)}
-        </div>
+        {isAdmin() ? (
+          <div className="set-row">
+            <span>Prędkość gry (admin):</span>
+            {[1, 2, 5, 20].map((n) => <button key={n} className={`wbtn ${s.speed === n ? 'on' : ''}`} onClick={() => { s.speed = n; bump() }}>×{n}</button>)}
+            <button className="wbtn" onClick={() => { lockAdmin(); s.speed = 1; bump() }}>Zablokuj</button>
+          </div>
+        ) : (
+          <div className="set-row">
+            <span>Tryb testowy:</span>
+            <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="hasło administratora" className="pw" />
+            <button className="wbtn" onClick={async () => { if (await unlockAdmin(pw)) { setPw(''); setMsg('Tryb administratora włączony.') } else setMsg('Złe hasło.'); bump() }}>Odblokuj</button>
+          </div>
+        )}
+        {isOverlay && displays.length > 1 && (
+          <div className="set-row">
+            <span>Ekran:</span>
+            {displays.map((dd) => <button key={dd.id} className={`wbtn ${dd.current ? 'on' : ''}`} onClick={() => { native?.setDisplay?.(dd.id); setDisplays(native?.getDisplays?.() ?? []) }}>{dd.label}</button>)}
+          </div>
+        )}
         <div className="set-row">
           <span>Skala interfejsu:</span>
           {(['auto', 0.8, 0.9, 1, 1.1] as const).map((v) => <button key={String(v)} className={`wbtn ${layout().scale === v ? 'on' : ''}`} onClick={() => { saveLayout({ scale: v }); bump() }}>{v === 'auto' ? 'Auto' : `${Math.round(v * 100)}%`}</button>)}

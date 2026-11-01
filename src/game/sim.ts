@@ -6,7 +6,7 @@ import type { ClassId } from '../data/classes'
 import { zoneById, ROUTES } from '../data/zones'
 import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, mobXp, rageConv, resourceOf, styleOf, xpToNext, MAX_LEVEL, type Derived } from './formulas'
 import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOODS } from './items'
-import { addToInv, autoEquip, fixInv, countItems } from './inventory'
+import { addToInv, fixInv, countItems } from './inventory'
 import { syncQuests } from './quests'
 import { makeRng, type Rng } from './rng'
 import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip } from './world'
@@ -156,7 +156,9 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
       const race = 1 + (raceById(h.race).mods.regenPct ?? 0)
       const e = h.eating
       const eat = e && e.left > 0
-      h.hp = Math.min(d.maxHp, h.hp + (d.maxHp * 0.018 * race + (eat ? e!.hp : 0)) * dt)
+      // klasy z leczeniem leczą się czarem po walce (talenty leczenia skracają odpoczynek)
+      const selfHeal = healerRest(h, d)
+      h.hp = Math.min(d.maxHp, h.hp + (d.maxHp * (0.018 * race + selfHeal) + (eat ? e!.hp : 0)) * dt)
       if (d.res === 'mana') h.res = Math.min(d.maxRes, h.res + (d.maxRes * 0.02 + (eat ? e!.mana : 0)) * dt)
       if (e) e.left -= dt
       const full = h.hp >= d.maxHp * 0.98 && (d.res !== 'mana' || h.res >= d.maxRes * 0.98)
@@ -185,6 +187,16 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
 
 function regenOut(h: Hero, d: Derived, dt: number, pct: number) {
   h.hp = Math.min(d.maxHp, h.hp + d.maxHp * pct * dt * (1 + (raceById(h.race).mods.regenPct ?? 0)))
+}
+
+// Leczenie poza walką: % max HP na sekundę dla klas, które znają czar leczący
+export function healerRest(h: Hero, d: Derived) {
+  const g = grants(h)
+  const heals = classById(h.cls).abilities.filter((a) => (a.kind === 'heal' || a.kind === 'hot') && !a.healPct && knows(h, a, g) && !h.disabled[a.id])
+  if (!heals.length || d.res !== 'mana') return 0
+  const ab = Math.max(...heals.map((a) => d.m[`ab:${a.id}`] ?? 0))
+  const cast = Math.max(...heals.map((a) => d.m[`cast:${a.id}`] ?? 0))
+  return 0.025 * (1 + 3 * (d.m.heal ?? 0) + ab + cast)
 }
 
 // ------------------------------------------------------------------ jedzenie i picie
@@ -307,13 +319,13 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
   const b = bossState(s)
   const r = raceById(h.race)
   // wróg podchodzi: walczący wręcz biegną sobie naprzeciw (krótko), dystansowcy strzelają, zanim dojdzie
-  const dist = style === 'melee' ? 1.1 : 2.4
+  const dist = style === 'melee' ? 1.6 : 4.5
   if (b.frontier && b.full) {
     const look = bossLook(zoneId, sub)
     const zoneBoss = subOf(s).zoneBoss
     const ms = mobStats(b.lvl)
     const hp = Math.round(ms.hp * (zoneBoss ? 3.6 : 2.4))
-    s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini', dist, dist0: dist, cc: 0 }
+    s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini', dist, dist0: dist, cc: 0, slow: 0 }
     emit({ t: 'spawn', mob: look.name, lvl: b.lvl, boss: s.mob.boss })
     log(s, `${zoneBoss ? 'BOSS' : 'Miniboss'}: ${look.name} (${b.lvl}) wychodzi do walki!`, '#ff8040')
   } else {
@@ -325,7 +337,7 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
     const count = h.level < 4 ? 1 : h.level < 8 ? (roll < 0.75 ? 1 : 2) : roll < 0.5 ? 1 : roll < 0.83 ? 2 : 3
     const each = count === 1 ? 1 : count === 2 ? 0.8 : 0.7 // w grupach moby są nieco słabsze
     const per = Math.round(ms.hp * (0.92 + rng.next() * 0.16) * each)
-    s.mob = { name, type, color, lvl, hp: per * count, maxHp: per * count, per, dmg: ms.dmg * each, speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count, dist, dist0: dist, cc: 0 }
+    s.mob = { name, type, color, lvl, hp: per * count, maxHp: per * count, per, dmg: ms.dmg * each, speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count, dist, dist0: dist, cc: 0, slow: 0 }
     emit({ t: 'spawn', mob: name, lvl })
   }
   s.phase = 'fight'
@@ -349,7 +361,8 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   const mob = s.mob!
   const haste = d.haste
   fightT += dt
-  if (mob.dist > 0) mob.dist = Math.max(0, mob.dist - dt)
+  if (mob.slow > 0) mob.slow -= dt
+  if (mob.dist > 0) mob.dist = Math.max(0, mob.dist - dt * (mob.slow > 0 ? 0.5 : 1))
   if (mob.cc > 0) mob.cc -= dt
   const inMelee = mob.dist <= 0
 
@@ -370,7 +383,9 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   if (h.casting) {
     h.casting.left -= dt * haste
     if (h.casting.left <= 0) {
-      const a = classById(h.cls).abilities.find((x) => x.id === h.casting!.id)!
+      const a0 = classById(h.cls).abilities.find((x) => x.id === h.casting!.id)!
+      const pm = h.casting.mult ?? 1
+      const a = pm < 1 ? { ...a0, power: (a0.power ?? 1) * pm } : a0
       h.casting = null
       resolve(s, a, d, rng, emit)
       if (s.mob && s.mob.hp <= 0) return onKill(s, rng, emit)
@@ -383,7 +398,7 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
       if (castT > 0) { h.casting = { id: a.id, left: castT, total: castT }; emit({ t: 'cast', ability: a.name, school: a.school, kind: a.kind }) }
       else { resolve(s, a, d, rng, emit); if (s.mob && s.mob.hp <= 0) return onKill(s, rng, emit) }
       if ((d.m.instant ?? 0) > 0 && castT === 0 && a.cast) clearInstant(h)
-      h.gcd = d.res === 'energy' ? 1 : 1.5
+      h.gcd = a.kind === 'totem' ? 1 : d.res === 'energy' ? 1 : 1.5
       lastNoAction = false
     } else lastNoAction = true
   }
@@ -443,6 +458,7 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
           if (dmg > 0) {
             h.hp -= dmg
             emit({ t: 'dmg', src: 'mob', amt: Math.round(dmg) })
+            castHit(s, d, rng, emit)
             if (d.res === 'rage') h.res = Math.min(100, h.res + ((2.5 * dmg) / rageConv(h.level)) * (1 + (d.m.resGen ?? 0)))
           }
           procs(s, d, rng, emit, 'taken')
@@ -460,6 +476,32 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   if (h.hp <= 0) onDeath(s, emit)
 }
 let lastNoAction = false
+
+// Ciosy w trakcie rzucania: cofają pasek (czary) albo skracają kanał; czasem wróg przerywa czar.
+// Talenty "mniej przerywania" (np. Eye of the Storm, Healing Focus) dają klucz pushback.
+function castHit(s: GameState, d: Derived, rng: Rng, emit: Emit) {
+  const h = s.hero
+  const c = h.casting
+  const mob = s.mob
+  if (!c || !mob) return
+  const resist = Math.min(0.9, d.m.pushback ?? 0)
+  const a = classById(h.cls).abilities.find((x) => x.id === c.id)
+  const kick = (mob.type === 'humanoid' ? 0.08 : mob.boss ? 0.06 : 0) * (1 - resist)
+  if (kick > 0 && rng.chance(kick)) {
+    h.casting = null
+    h.gcd = 2
+    emit({ t: 'interrupt', ability: a?.name ?? '' })
+    return
+  }
+  if (a?.channel) {
+    const cut = c.total * 0.2 * (1 - resist)
+    c.left -= cut
+    c.mult = (c.mult ?? 1) * (1 - 0.2 * (1 - resist))
+  } else if ((c.pb ?? 0) < 3) {
+    c.left = Math.min(c.total, c.left + 0.5 * (1 - resist))
+    c.pb = (c.pb ?? 0) + 1
+  }
+}
 
 const sweepMul = (s: GameState, d: Derived) => ((d.m.sweep ?? 0) > 0 && s.mob && aliveOf(s.mob) >= 2 ? 1.5 : 1)
 
@@ -502,7 +544,7 @@ function procs(s: GameState, d: Derived, rng: Rng, emit: Emit, on: 'hit' | 'take
 }
 function whiteSwingNoProc(s: GameState, d: Derived, rng: Rng, emit: Emit) {
   const crit = rng.chance(d.crit)
-  hitMob(s, d, whiteHit(d, rng) * (crit ? 2 : 1) * dmgMult(d, null, true), crit, emit, 'physical', 'Windfury')
+  hitMob(s, d, whiteHit(d, rng) * (crit ? 2 : 1) * dmgMult(d, null, true) * (1 + (d.m['ab:windfury'] ?? 0)), crit, emit, 'physical', 'Windfury')
 }
 
 function whiteHit(d: Derived, rng: Rng) {
@@ -601,6 +643,7 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
     case 'shield': return h.equip.offhand?.weaponType === 'Shield'
     case 'boss': return !!mob.boss || aliveOf(mob) >= 3
     case 'twoTotems': return missingTotems(h).length >= 2
+    case 'behind': return mob.stun > 0 || fightT < mob.dist0 + 1.6
   }
   return true
 }
@@ -656,10 +699,12 @@ function rotation(s: GameState, d: Derived): Ability | null {
     const special = (a.id === 'lightning_bolt' && (h.stacks.mw ?? 0) >= 5) || (a.id === 'arcane_missiles' && (h.stacks.ab ?? 0) >= 4)
     if (special) p = 5
     else {
-      const conds = [...defaults(a), ...(a.when ?? [])]
+      const conds = [...(a.closes ? [] : defaults(a)), ...(a.when ?? [])]
       if (!conds.every((c) => cond(s, d, c, a))) continue
     }
-    const score = (a.power ?? 1) / Math.max(1.5, a.cast ?? 0) * (a.aoe ? aliveOf(mob) : 1)
+    // wybór między równorzędnymi: realne obrażenia na sekundę rzucania (z talentami skracającymi czas i wzmacniającymi czar)
+    const phys = a.school === 'physical' || !a.school
+    const score = ((a.power ?? 1) * dmgMult(d, a, phys)) / Math.max(1.5, castTime(h, d, a)) * (a.aoe ? aliveOf(mob) : 1)
     if (p < bestP || (p === bestP && score > bestScore)) { best = a; bestP = p; bestScore = score }
   }
   return best
@@ -739,6 +784,13 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       const dmg = base * (a.power ?? 1) * (crit ? critMul(phys) : 1) * mult * aoeN * stack
       hitMob(s, d, dmg, crit, emit, a.school, a.name)
       if (a.heal) heal(h, d, dmg * a.heal, emit, a.name)
+      if (a.dot && s.mob) {
+        const total = bp * a.dot.power * d.spellMult * mult
+        const ticks = Math.max(1, Math.round(a.dot.dur / 3))
+        s.mob.dots = s.mob.dots.filter((x) => x.id !== a.id)
+        s.mob.dots.push({ id: a.id, name: a.name, school: a.school ?? 'fire', perTick: total / ticks, left: a.dot.dur, tickIn: 3 })
+      }
+      if (a.slow && s.mob) s.mob.slow = Math.max(s.mob.slow, a.slow)
       // Lightning Overload (Forever): darmowa kopia błyskawicy za połowę obrażeń
       if ((a.id === 'lightning_bolt' || a.id === 'chain_lightning') && s.mob && s.mob.hp > 0 && rng.chance(d.m.overload ?? 0)) hitMob(s, d, dmg * 0.5, false, emit, a.school, `${a.name} (Overload)`)
       if (d.m.instant && a.cast) clearInstant(h)
@@ -880,10 +932,25 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
   } else { s.phase = 'walk'; s.phaseT = 2.5 + rng.next() * 2.5 }
 }
 
-// Podróż: piesza w obrębie lądu, statki / zeppeliny między kontynentami
-export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noop, auto = false) {
+// Forma podróżna (Ghost Wolf, Travel Form) przyspiesza odcinki piesze
+export function travelForm(h: Hero): { name: string; speed: number } | null {
+  const g = grants(h)
+  const a = classById(h.cls).abilities.find((x) => x.travel && knows(h, x, g) && !h.disabled[x.id])
+  if (!a) return null
+  return { name: a.name, speed: a.travel! + (stats(h).m.travel ?? 0) }
+}
+export function tripPlan(s: GameState, zone: string, sub: number) {
+  const form = travelForm(s.hero)
+  const p = planTrip(s.hero.faction, s.loc.zone, zone, form?.speed ?? 0)
+  const fromName = `${zoneById(s.loc.zone).name}${s.where === 'field' ? `: ${subOf(s).name}` : ''}`
+  const toName = `${zoneById(zone).name}: ${subsOf(zone)[sub].name}`
+  return { ...p, form: form?.name, fromName, toName }
+}
+
+// Podróż: piesza w obrębie lądu, statki / zeppeliny między kontynentami (trwa, z odliczaniem na scenie)
+export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noop, _auto = false) {
   const changedZone = zone !== s.loc.zone
-  const plan = changedZone ? planTrip(s.hero.faction, s.loc.zone, zone) : { total: auto ? 5 : 3, kind: 'walk' as const, label: '' }
+  const plan = tripPlan(s, zone, sub)
   s.loc = { zone, sub }
   s.where = 'field'
   s.mob = null
@@ -891,11 +958,12 @@ export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noo
   s.hero.totems = []
   s.phase = 'travel'
   s.phaseT = plan.total
-  s.trip = { kind: plan.kind, label: plan.label || (changedZone ? `Podróż: ${zoneById(zone).name}` : ''), total: plan.total }
+  s.trip = { kind: plan.kind, label: plan.label || `${changedZone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form }
+  if (!s.unlocked.includes(zone)) s.unlocked.push(zone)
   progOf(s, zone)
   if (changedZone) emit({ t: 'zone', zone })
   emit({ t: 'sub', zone, sub })
-  if (plan.kind !== 'walk') log(s, `${plan.label} (${plan.total} s)`, '#69ccf0')
+  log(s, `${plan.label || `Podróż: ${plan.fromName} → ${plan.toName}`} (${plan.total} s${plan.form ? `, ${plan.form}` : ''})`, '#69ccf0')
 }
 
 export function gainXp(s: GameState, amt: number, emit: Emit) {
@@ -920,11 +988,6 @@ let lastFullWarn = 0
 function addLoot(s: GameState, it: Item, emit: Emit) {
   const h = s.hero
   s.totals.items++
-  if (s.autoEquip && autoEquip(h, it)) {
-    emit({ t: 'loot', item: it, equipped: true })
-    if (it.rarity >= 2) log(s, `Zakładasz: [${it.name}]`, ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][it.rarity])
-    return
-  }
   if (addToInv(h, it)) {
     emit({ t: 'loot', item: it, equipped: false })
     if (it.rarity >= 2) log(s, `Łup: [${it.name}]`, ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][it.rarity])

@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('azeroth', {
   quit: () => ipcRenderer.send('app:quit'),
   setAutostart: (on) => ipcRenderer.send('app:autostart', !!on),
   getAutostart: () => ipcRenderer.sendSync('app:autostart:get'),
+  getDisplays: () => ipcRenderer.sendSync('app:displays'),
+  setDisplay: (id) => ipcRenderer.send('app:display', id),
 })

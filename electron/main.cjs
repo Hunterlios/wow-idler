@@ -5,6 +5,12 @@
 // strona wysyła wtedy 'overlay:solid' (patrz src/platform.ts).
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
+const fs = require('fs')
+
+// ustawienia aplikacji (np. wybrany monitor) w folderze użytkownika
+const CFG = () => path.join(app.getPath('userData'), 'settings.json')
+function readCfg() { try { return JSON.parse(fs.readFileSync(CFG(), 'utf8')) } catch { return {} } }
+function writeCfg(c) { try { fs.writeFileSync(CFG(), JSON.stringify(c)) } catch { /* nic */ } }
 
 const DIST = path.join(__dirname, '..', 'dist')
 let win = null
@@ -13,7 +19,21 @@ let tray = null
 if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => showWin())
 
-const area = () => screen.getPrimaryDisplay().workArea
+// monitor, na którym leży gra (wybór w ustawieniach gry albo w menu zasobnika)
+function display() {
+  const id = readCfg().display
+  return screen.getAllDisplays().find((d) => d.id === id) ?? screen.getPrimaryDisplay()
+}
+const area = () => display().workArea
+function displays() {
+  const cur = display().id
+  const prim = screen.getPrimaryDisplay().id
+  return screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `Ekran ${i + 1}${d.id === prim ? ' (główny)' : ''} · ${d.size.width}×${d.size.height}`, current: d.id === cur }))
+}
+function setDisplay(id) {
+  writeCfg({ ...readCfg(), display: id })
+  fit()
+}
 
 function createWindow() {
   const wa = area()
@@ -56,6 +76,7 @@ function createTray() {
   tray.setToolTip('Azeroth Idle')
   const menu = () => Menu.buildFromTemplate([
     { label: win && win.isVisible() ? 'Ukryj pasek' : 'Pokaż pasek', click: () => (win && win.isVisible() ? win.hide() : showWin()) },
+    { label: 'Ekran', submenu: displays().map((d) => ({ type: 'radio', label: d.label, checked: d.current, click: () => setDisplay(d.id) })) },
     { type: 'checkbox', label: 'Uruchamiaj z Windowsem', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked }) },
     { type: 'separator' },
     { label: 'Zamknij', click: () => app.quit() },
@@ -69,6 +90,8 @@ ipcMain.on('overlay:solid', (_e, solid) => {
   win.setIgnoreMouseEvents(!solid, { forward: true })
 })
 ipcMain.on('app:hide', () => win && win.hide())
+ipcMain.on('app:displays', (e) => { e.returnValue = displays() })
+ipcMain.on('app:display', (_e, id) => setDisplay(id))
 ipcMain.on('app:quit', () => app.quit())
 ipcMain.on('app:autostart', (_e, on) => app.setLoginItemSettings({ openAtLogin: !!on }))
 ipcMain.on('app:autostart:get', (e) => { e.returnValue = app.getLoginItemSettings().openAtLogin })

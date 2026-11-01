@@ -1,4 +1,4 @@
-# Azeroth Idle (demo 0.4)
+# Azeroth Idle (demo 0.5)
 
 Idle RPG w klimacie WoW Classic. Siedzi jako pasek nad paskiem zadań Windows i gra się sam: bohater chodzi po strefach, walczy, zbiera łup, robi zadania, awansuje i wędruje dalej trasą levelowania swojej frakcji. Gra liczy się też wtedy, gdy jest zamknięta.
 
@@ -13,7 +13,7 @@ npm install
 npm run dev        # wersja w przeglądarce: http://localhost:5173 (najszybsze testy)
 npm run app        # build + aplikacja Electron (pasek nad taskbarem)
 npm run app:dev    # Electron z hot-reloadem Vite
-npm run dist       # przenośny .exe dla Windows -> folder release/
+npm run dist       # przenośny .exe dla Windows -> folder release/ (albo dwuklik w zbuduj-exe.bat)
 npm run balance    # symulacja 24 h gry (gracz zagląda do miasta co godzinę) dla wszystkich ras i klas
 ```
 
@@ -50,6 +50,18 @@ npm run balance    # symulacja 24 h gry (gracz zagląda do miasta co godzinę) d
 - **Pełniejsze drzewka talentów** (4 kolumny, 14–20 talentów na drzewko) według WoW Forever. Szamański Elemental jest odwzorowany 1:1 z bety, a w pozostałych drzewach nowe i zmienione talenty Forever (niebieska kropka) wstawiono w układ z 1.12. Przy aktualizacji punkty talentów wracają do rozdania.
 - **Okno postaci:** tooltip przy każdym atrybucie (co daje, ile redukcji obrażeń daje pancerz na twoim poziomie i +3).
 - **Zadania „zbierz”** to prawdziwe przedmioty w torbach. Po porzuceniu i ponownym wzięciu zadania zebrane już przedmioty się liczą.
+
+### Nowe w 0.5
+- **Szoki szamana do wyboru** (jeden naraz, jak wspólny cooldown w grze): Earth Shock (najmocniejszy cios), Flame Shock (obrażenia + podpalenie, wzmacnia Lava Burst), Frost Shock (spowalnia podchodzącego wroga). Fire Nova ma animację fali ognia z totemu.
+- **Totemy:** na pasku akcji widać, ile jeszcze stoi totem; stawianie ma 1 s globalnego cooldownu jak w Classicu.
+- **Podróże trwają** (np. 50 s–5 min, statek/zeppelin 60 s), przed każdą jest okno z trasą i czasem, a na scenie pasek postępu z odliczaniem. Szaman (Ghost Wolf) i druid (Travel Form) podróżują sami w formie podróżnej szybciej; Improved Ghost Wolf przyspiesza ją dalej.
+- **Wolne podróże:** każda mapa jest dostępna od razu, także wyższego poziomu (ostrzeżenie w oknie podróży). Podstrefy w mapie otwierają się po kolei.
+- **Walka:** wrogowie podchodzą wolniej (dystansowcy mają czas na czary), pasek auto-ataku, nazwa i poziom każdego moba nad paskiem życia, pasek rzucania nad postacią. Ciosy cofają pasek rzucania i skracają kanały, humanoidy potrafią przerwać czar. Talenty typu Eye of the Storm, Healing Focus, Burning Soul zmniejszają ten efekt.
+- **Talenty przeanalizowane symulacją** (każdy talent osobno, 2×40 min walki): poprawione talenty bez efektu i słabe zwieńczenia (m.in. Mortal Strike, Bloodthirst, Shield Slam, Aimed Shot, Bestial Wrath, Pyroblast, Shadowform, Holy Shield, Mutilate). Klasy z leczeniem leczą się po walce, więc talenty leczenia skracają odpoczynek.
+- **Usunięte:** automatyczne zakładanie łupu, skróty klawiszy na pasku akcji, oznaczenia „Forever” w talentach.
+- **Torby** stoją przy prawej krawędzi; każdą przesuwasz osobno (pozycje się zapisują, dwuklik w tytuł przywraca).
+- **Wybór monitora** w ustawieniach (i w menu ikony w zasobniku).
+- **Tryb testowy:** zmiana prędkości gry tylko po wpisaniu hasła administratora w ustawieniach.
 
 Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classica, bez plików Blizzarda.
 

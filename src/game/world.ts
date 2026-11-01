@@ -66,7 +66,9 @@ export function townOf(z: Zone, faction: Faction): string | null {
 export const capitalOf = (s: GameState) => raceById(s.hero.race).start.capital
 
 export const isUnlocked = (s: GameState, zoneId: string) => s.unlocked.includes(zoneId)
-export const canTravel = (s: GameState, zoneId: string, sub: number) => isUnlocked(s, zoneId) && sub <= Math.min(progOf(s, zoneId).cleared, subsOf(zoneId).length - 1)
+// Jak w grze: na każdą mapę można pójść od razu (także wyższego poziomu). W obrębie mapy podstrefy
+// otwierają się po kolei (pokonaj minibossa poprzedniej).
+export const canTravel = (s: GameState, zoneId: string, sub: number) => sub <= Math.min(progOf(s, zoneId).cleared, subsOf(zoneId).length - 1)
 
 export function zonePct(s: GameState, zoneId: string) {
   const p = progOf(s, zoneId)
@@ -85,17 +87,19 @@ export const TRANSPORTS: Transport[] = [
   { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'tirisfal', label: 'Zeppelin: Orgrimmar ↔ Undercity' },
   { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'stranglethorn', label: "Zeppelin: Orgrimmar ↔ Grom'gol" },
 ]
-const RIDE = 40 // s rejsu
+const RIDE = 60 // s rejsu / lotu
 const landmass = (id: string) => { const z = zoneById(id); const p = z.parent ?? id; return p === 'teldrassil' ? 'tel' : z.continent }
 const mainZone = (id: string) => zoneById(id).parent ?? id
 function walk(a: string, b: string) {
   const za = zoneById(a), zb = zoneById(b)
-  return Math.min(40, 6 + Math.hypot(za.x - zb.x, za.y - zb.y) * 0.35)
+  return Math.min(150, 25 + Math.hypot(za.x - zb.x, za.y - zb.y) * 1.3)
 }
 
-export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin'; label: string }
-export function planTrip(faction: Faction, from: string, to: string): TripPlan {
-  if (from === to) return { total: 3, kind: 'walk', label: '' }
+export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin'; label: string; walkSecs: number; speed: number }
+export const SUB_WALK = 12 // s między podstrefami
+// speed = premia z formy podróżnej (Ghost Wolf, Travel Form): skraca tylko odcinki piesze
+export function planTrip(faction: Faction, from: string, to: string, speed = 0): TripPlan {
+  if (from === to) return { total: Math.round(SUB_WALK / (1 + speed)), kind: 'walk', label: '', walkSecs: SUB_WALK, speed }
   const ZS = ZONE_IDS
   const dist: Record<string, number> = {}
   const prev: Record<string, { via: Transport | null; from: string }> = {}
@@ -123,10 +127,13 @@ export function planTrip(faction: Faction, from: string, to: string): TripPlan {
   }
   let kind: TripPlan['kind'] = 'walk'
   const labels: string[] = []
+  let rides = 0
   for (let v = to; prev[v]; v = prev[v].from) {
     const t = prev[v].via
-    if (t) { kind = t.kind; labels.unshift(t.label) }
+    if (t) { kind = t.kind; labels.unshift(t.label); rides++ }
   }
   const label = labels.join(' → ')
-  return { total: Math.round(Math.min(150, dist[to] === Infinity ? 30 : dist[to])), kind, label }
+  const all = dist[to] === Infinity ? 60 : dist[to]
+  const walkSecs = Math.max(0, all - rides * RIDE)
+  return { total: Math.round(Math.min(400, walkSecs / (1 + speed) + rides * RIDE)), kind, label, walkSecs, speed }
 }

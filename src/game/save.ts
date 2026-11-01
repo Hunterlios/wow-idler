@@ -26,7 +26,7 @@ export function loadGame(): GameState | null {
 
 export function migrate(o: Any): GameState | null {
   if (!o || !o.hero) return null
-  if (o.v === 4) { fixInv(o.hero); return o as GameState }
+  if (o.v === 4) { fixInv(o.hero); if (o.mob) o.mob.slow ??= 0; return o as GameState }
   if (o.v === 3) return v3to4(o)
   if (o.v === 2) return v3to4(v2to3(o))
   if (o.v !== 1) return null
@@ -99,7 +99,7 @@ function v3to4(o: Any): GameState {
   const food = FOODS.filter((f) => f.kind === 'food' && f.lvl <= h.level).pop()!
   addToInv(h, makeFood(o.itemSeq++, food, 10))
   if (c.resource === 'mana') addToInv(h, makeFood(o.itemSeq++, FOODS.filter((f) => f.kind === 'drink' && f.lvl <= h.level).pop()!, 10))
-  if (o.mob) { o.mob.dist ??= 0; o.mob.dist0 ??= 0; o.mob.cc ??= 0 }
+  if (o.mob) { o.mob.dist ??= 0; o.mob.dist0 ??= 0; o.mob.cc ??= 0; o.mob.slow ??= 0 }
   o.log?.push({ time: Date.now(), text: 'Wersja 0.4: przeciąganie przedmiotów, jedzenie i picie, totemy, umiejętności broni, talenty z WoW Forever. Punkty talentów zwrócone — rozdaj je od nowa (N).', color: '#69ccf0' })
   return o as GameState
 }

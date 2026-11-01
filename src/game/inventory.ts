@@ -232,3 +232,16 @@ export function moveBag(h: Hero, i: number, j: number) {
   ;[segs[i + 1], segs[j + 1]] = [segs[j + 1], segs[i + 1]]
   h.inv = segs.flat()
 }
+
+// Gracz przegląda torby i zakłada lepsze rzeczy (używane przez test balansu, w grze robi to gracz ręcznie)
+export function equipUpgrades(h: Hero) {
+  let n = 0
+  for (let i = 0; i < h.inv.length; i++) {
+    const it = h.inv[i]
+    if (!it?.slot) continue
+    h.inv[i] = null
+    if (autoEquip(h, it)) n++
+    else h.inv[i] = it
+  }
+  return n
+}

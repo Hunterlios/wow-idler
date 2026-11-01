@@ -3,7 +3,7 @@
 import { classById, type School } from '../data/classes'
 import { raceById } from '../data/races'
 import type { Biome, MobType } from '../data/zones'
-import { currentZone, activePet } from '../game/sim'
+import { currentZone, activePet, aliveOf as aliveOfMob } from '../game/sim'
 import { styleOf } from '../game/formulas'
 import { zoneById } from '../data/zones'
 import { townOf } from '../game/world'
@@ -13,7 +13,7 @@ import { RARITY_COLOR } from '../game/types'
 type Float = { x: number; y: number; vy: number; text: string; color: string; life: number; max: number; size: number }
 type Proj = { x: number; y: number; tx: number; color: string; life: number }
 type Corpse = { type: MobType; color: string; x: number; life: number; count: number }
-type Fx = { kind: 'levelup' | 'heal' | 'racial' | 'death'; life: number; text?: string }
+type Fx = { kind: 'levelup' | 'heal' | 'racial' | 'death' | 'nova'; life: number; text?: string; x?: number }
 
 const SCHOOL_COLOR: Record<School, string> = {
   physical: '#ffffff', fire: '#ff7a1a', frost: '#7fd4ff', arcane: '#ff8af0', shadow: '#a066ff', holy: '#ffe680', nature: '#7dff6a',
@@ -119,6 +119,13 @@ export class Scene {
         }
         this.castGlow = 0.4
         this.castColor = SCHOOL_COLOR[e.school ?? 'physical']
+        if (e.ability === 'Fire Nova') {
+          const ft = this.totemVis.find((v) => v.el === 'fire' && !v.gone)
+          this.fx.push({ kind: 'nova', life: 0.7, x: ft ? ft.x + 2 * (this.px / 2) : this.heroX })
+        }
+        break
+      case 'interrupt':
+        add(hx, 'Przerwane!', '#ff8040', 13)
         break
       case 'kill': {
         const m = this.lastMobState
@@ -265,7 +272,11 @@ export class Scene {
       if (boss) {
         ctx.strokeStyle = '#d4a838'; ctx.lineWidth = 1.5; ctx.strokeRect(this.mobX - bw / 2 - 2, by - 2, bw + 4, 8)
         this.text(`${s.mob.name}${boss === 'zone' ? ' ☠' : ''}`, this.mobX, by - 5, boss === 'zone' ? '#ff6a40' : '#ffb347', 11, true)
+      } else {
+        const col = s.mob.lvl > s.hero.level + 2 ? '#ff5050' : s.mob.lvl >= s.hero.level - 2 ? '#ffe060' : '#60e060'
+        this.text(`${s.mob.name} (${s.mob.lvl})${s.mob.count > 1 ? ` ×${aliveOfMob(s.mob)}` : ''}`, this.mobX, by - 4, col, 10, true)
       }
+      if (s.mob.slow > 0) this.text('❄', this.mobX + bw / 2 + 8, by + 5, '#9ad8ff', 10, true)
       if (s.mob.dots.length) {
         s.mob.dots.forEach((d, i) => { ctx.fillStyle = SCHOOL_COLOR[d.school]; ctx.fillRect(this.mobX - bw / 2 + i * 6, by + 6, 4, 3) })
       }
@@ -316,6 +327,17 @@ export class Scene {
         ctx.globalAlpha = Math.min(1, f.life)
         this.text(f.text!, this.heroX, gy - 34 * p, '#ffb347', 10, true)
         ctx.globalAlpha = 1
+      } else if (f.kind === 'nova') {
+        // Fire Nova: pierścień ognia rozchodzący się od totemu ognia
+        const k = 1 - f.life / 0.7
+        const r = (8 + k * 70) * (p / 2)
+        ctx.globalAlpha = Math.max(0, f.life / 0.7)
+        ctx.strokeStyle = '#ff8a30'; ctx.lineWidth = 3 + 4 * (1 - k)
+        ctx.shadowColor = '#ff4a10'; ctx.shadowBlur = 12
+        ctx.beginPath(); ctx.ellipse(f.x ?? this.heroX, gy - 4 * p, r, r * 0.35, 0, 0, Math.PI * 2); ctx.stroke()
+        ctx.fillStyle = 'rgba(255,140,40,.25)'; ctx.fill()
+        ctx.shadowBlur = 0
+        ctx.globalAlpha = 1
       } else if (f.kind === 'heal') {
         ctx.globalAlpha = f.life
         ctx.fillStyle = '#7dff6a'
@@ -338,9 +360,36 @@ export class Scene {
     this.floats = this.floats.filter((f) => f.life > 0)
     if (this.floats.length > 30) this.floats.splice(0, this.floats.length - 30)
 
+    // pasek rzucania nad postacią
+    const cst = s.hero.casting
+    if (cst && s.phase === 'fight') {
+      const ab = classById(s.hero.cls).abilities.find((a) => a.id === cst.id)
+      // mały pasek nad głową (nazwa czaru jest w ramce postaci)
+      const bw = 34, bx = this.heroX - bw / 2, by = Math.max(4, gy - 27 * p)
+      ctx.fillStyle = 'rgba(0,0,0,.75)'; ctx.fillRect(bx - 1, by - 1, bw + 2, 5)
+      const k = ab?.channel ? cst.left / cst.total : 1 - cst.left / cst.total
+      ctx.fillStyle = ab?.channel ? '#4ad04a' : '#ffd24a'; ctx.fillRect(bx, by, bw * Math.max(0, Math.min(1, k)), 3)
+    }
+
     // napisy stanu
-    if (s.phase === 'travel') this.text(`→ ${s.trip?.label || zone.name}`, w / 2, 16, '#ffd100', 13, true)
+    if (s.phase === 'travel') this.travelBanner(s)
     if (s.phase === 'dead') this.text(`Duch wraca do zwłok... ${Math.ceil(s.phaseT)} s`, w / 2, 16, '#c0d8ff', 12, true)
+  }
+
+  // Podróż: skąd → dokąd, pasek postępu i odliczanie
+  travelBanner(s: GameState) {
+    const c = this.ctx
+    const t = s.trip
+    const total = t?.total ?? 1
+    const left = Math.max(0, s.phaseT)
+    const k = Math.max(0, Math.min(1, 1 - left / total))
+    const bw = Math.min(420, this.w * 0.5), bx = this.w / 2 - bw / 2, by = 22
+    const m = Math.floor(left / 60), sec = Math.ceil(left % 60)
+    this.text(`${t?.from ?? ''}  →  ${t?.to ?? t?.label ?? ''}`, this.w / 2, 13, '#ffd100', 12, true)
+    c.fillStyle = 'rgba(0,0,0,.6)'; c.fillRect(bx - 2, by - 2, bw + 4, 10)
+    c.fillStyle = '#c8a040'; c.fillRect(bx, by, bw * k, 6)
+    c.fillStyle = '#fff'; c.fillRect(bx + bw * k - 1, by - 2, 3, 10)
+    this.text(`${m ? `${m}:${String(sec).padStart(2, '0')}` : `${sec} s`}${t?.form ? ` · ${t.form}` : ''}`, this.w / 2, by + 19, '#ffffff', 11, true)
   }
 
   totems(s: GameState, gy: number, moving: boolean, dt: number) {
@@ -628,6 +677,16 @@ export class Scene {
 
   // ---------------------------------------------------------------- postacie
   hero(s: GameState, gy: number, moving: boolean, dt: number) {
+    if (s.phase === 'travel' && s.trip?.form && s.trip.kind === 'walk') {
+      // forma podróżna: duch wilka (szaman) albo gepard (druid)
+      const wolf = s.hero.cls === 'shaman'
+      this.shadow(this.heroX, gy, 14 * (this.px / 2))
+      this.ctx.save()
+      if (wolf) { this.ctx.globalAlpha = 0.85; this.ctx.filter = 'drop-shadow(0 0 4px #7ad0ff)' }
+      this.quad(this.heroX, gy, wolf ? '#8ab4d8' : '#d8b060', moving ? Math.sin(this.t * 14) : 0, 1, false, wolf ? undefined : 'cat')
+      this.ctx.restore()
+      return
+    }
     const c = this.ctx
     const p = this.px / 2
     const r = raceById(s.hero.race)

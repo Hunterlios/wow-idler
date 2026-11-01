@@ -7,6 +7,7 @@ import { boardFor, acceptQuest, questReady } from '../src/game/quests'
 import { enterTown, enterCapital, leaveTown, trainAll, sellJunk, turnIn, buyBag, restock } from '../src/game/town'
 import { BAGS_FOR_SALE } from '../src/game/items'
 import { autoTalents } from '../src/game/talents'
+import { equipUpgrades } from '../src/game/inventory'
 import type { GameState } from '../src/game/types'
 
 const hours = Number(process.argv[2] ?? 24)
@@ -18,6 +19,7 @@ const form = process.argv[6]
 const disable = (process.argv[7] ?? '').split(',').filter(Boolean)
 
 export function visit(s: GameState) {
+  equipUpgrades(s.hero)
   enterCapital(s)
   trainAll(s)
   autoTalents(s, spec)
