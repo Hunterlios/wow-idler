@@ -5,7 +5,8 @@ import { JUNK, makeGear } from './items'
 import { makeRng } from './rng'
 import { subMobs, subsOf, subLevels, bossLevel, progOf, townOf } from './world'
 import { xpToNext } from './formulas'
-import type { GameState, Quest } from './types'
+import { countItems } from './inventory'
+import type { GameState, Item, Quest } from './types'
 
 export const MAX_QUESTS = 10
 
@@ -75,7 +76,14 @@ export function boardFor(s: GameState, zoneId: string): Quest[] {
 export function acceptQuest(s: GameState, q: Quest) {
   if (s.quests.length >= MAX_QUESTS || s.quests.some((x) => x.id === q.id)) return false
   s.quests.push({ ...q })
+  syncQuests(s) // przedmioty zebrane wcześniej (np. przed porzuceniem zadania) się liczą
   return true
+}
+
+// Przedmioty zadań są prawdziwymi przedmiotami w torbach: postęp = ile ich masz
+export const isQuestItem = (q: Quest) => (it: Item) => it.quest === q.id
+export function syncQuests(s: GameState) {
+  for (const q of s.quests) if (q.kind === 'collect') q.have = Math.min(q.need, countItems(s.hero, isQuestItem(q)))
 }
 
 export function abandonQuest(s: GameState, id: string) {

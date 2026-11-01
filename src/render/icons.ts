@@ -95,6 +95,19 @@ function drawWeapon(g: CanvasRenderingContext2D, wt: string, gemColor: string) {
       gem(g, 0, -15, 3.5, gemColor)
       break
     }
+    case 'Fist Weapon': {
+      fillShape(g, '#6a4a2a', () => { g.roundRect(-12, 0, 24, 16, 4) }, -12, 0, 12, 16)
+      for (const o of [-8, 0, 8]) fillShape(g, steel, () => { g.moveTo(o - 3, 2); g.quadraticCurveTo(o + 6, -14, o + 2, -24); g.quadraticCurveTo(o, -10, o - 3, 2) }, o - 3, -24, o + 6, 2)
+      gem(g, 0, 8, 3, gemColor)
+      break
+    }
+    case 'Polearm': {
+      g.rotate(-Math.PI / 4)
+      fillShape(g, wood, () => { g.rect(-2, -14, 4, 42) }, -2, -14, 2, 28)
+      fillShape(g, steel, () => { g.moveTo(0, -28); g.lineTo(4, -16); g.lineTo(14, -12); g.lineTo(14, -2); g.lineTo(2, -8); g.lineTo(-2, -8); g.lineTo(-4, -16); g.closePath() }, -4, -28, 14, -2)
+      gem(g, 0, -12, 3, gemColor)
+      break
+    }
     case 'Staff': {
       g.rotate(-Math.PI / 5)
       fillShape(g, wood, () => { g.rect(-2.5, -20, 5, 46) }, -3, -20, 3, 26)
@@ -214,7 +227,20 @@ function drawArmor(g: CanvasRenderingContext2D, slot: string, color: string, gem
 
 function drawJunk(g: CanvasRenderingContext2D, name: string, rarityColor: string) {
   const n = name.toLowerCase()
-  if (/fang|claw|tusk|talon|tooth|toenail|stinger|beak/.test(n)) {
+  if (/water|milk|juice|nectar|dew/.test(n)) {
+    fillShape(g, '#c8e4f0', () => { g.moveTo(24, 10); g.lineTo(40, 10); g.lineTo(40, 20); g.quadraticCurveTo(52, 30, 48, 54); g.lineTo(16, 54); g.quadraticCurveTo(12, 30, 24, 20); g.closePath() })
+    g.fillStyle = /milk/.test(n) ? '#f8f8f0' : /juice|nectar/.test(n) ? '#e89a40' : /dew/.test(n) ? '#a0e0a0' : '#5aa8e8'; g.fillRect(17, 34, 30, 18)
+    fillShape(g, '#8a6a3a', () => { g.rect(26, 6, 12, 6) })
+  } else if (/bread|pie|cornbread/.test(n)) {
+    fillShape(g, '#c88a3a', () => { g.ellipse(32, 36, 22, 14, 0, 0, 7) })
+    g.strokeStyle = 'rgba(0,0,0,.35)'; g.beginPath(); for (const x of [22, 32, 42]) { g.moveTo(x - 4, 28); g.lineTo(x + 4, 42) } g.stroke()
+    if (/pie/.test(n)) { g.fillStyle = '#a01a2a'; g.beginPath(); g.arc(32, 32, 6, 0, 7); g.fill() }
+  } else if (/egg|omelet/.test(n)) {
+    fillShape(g, '#f4ecd4', () => { g.ellipse(32, 34, 16, 20, 0, 0, 7) }); g.fillStyle = '#f0c030'; g.beginPath(); g.arc(32, 36, 7, 0, 7); g.fill()
+  } else if (/steak|chops|squid|dumpling|soup|tuber/.test(n)) {
+    fillShape(g, /soup/.test(n) ? '#8a6a4a' : '#a04a3a', () => { g.ellipse(32, 34, 22, 15, -0.3, 0, 7) })
+    g.fillStyle = /soup/.test(n) ? '#e0a040' : '#f0d0c0'; g.beginPath(); g.ellipse(32, 32, 10, 6, -0.3, 0, 7); g.fill()
+  } else if (/fang|claw|tusk|talon|tooth|toenail|stinger|beak/.test(n)) {
     fillShape(g, '#e8dcc0', () => { g.moveTo(22, 12); g.quadraticCurveTo(46, 20, 42, 54); g.quadraticCurveTo(30, 34, 22, 12) })
   } else if (/pelt|hide|fur/.test(n)) {
     fillShape(g, '#8a6a4a', () => { g.moveTo(14, 16); g.lineTo(50, 14); g.lineTo(54, 30); g.lineTo(46, 52); g.lineTo(20, 54); g.lineTo(10, 34); g.closePath() })
@@ -240,7 +266,7 @@ function drawJunk(g: CanvasRenderingContext2D, name: string, rarityColor: string
 }
 
 export function itemIcon(it: Item): string {
-  const key = `${it.slot}|${it.weaponType}|${it.armorType}|${it.rarity}|${it.ilvl >> 3}|${it.bagSize ?? 0}|${it.slot ? '' : it.name}`
+  const key = `${it.slot}|${it.weaponType}|${it.armorType}|${it.rarity}|${it.ilvl >> 3}|${it.bagSize ?? 0}|${it.slot ? '' : it.name}|${it.quest ? 'q' : ''}`
   const hit = cache.get(key)
   if (hit) return hit
   const g = canvas()
@@ -250,7 +276,10 @@ export function itemIcon(it: Item): string {
     fillShape(g, '#8a6a3a', () => { g.moveTo(16, 24); g.quadraticCurveTo(12, 56, 32, 56); g.quadraticCurveTo(52, 56, 48, 24); g.closePath() })
     g.strokeStyle = '#d4a838'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(18, 24); g.lineTo(46, 24); g.stroke()
     fillShape(g, '#6a4a2a', () => { g.moveTo(24, 24); g.lineTo(28, 10); g.lineTo(36, 10); g.lineTo(40, 24); g.closePath() })
-  } else if (!it.slot) drawJunk(g, it.name, gc)
+  } else if (!it.slot) {
+    drawJunk(g, it.name, gc)
+    if (it.quest) { g.fillStyle = '#ffd100'; g.font = 'bold 22px serif'; g.fillText('!', 48, 22) }
+  }
   else if (it.weaponType) drawWeapon(g, it.weaponType, gc)
   else {
     const t = Math.min(4, Math.floor(it.ilvl / 12))
@@ -274,6 +303,40 @@ const GLYPH: Record<string, string> = {
   frost_armor: 'flake', arcane_intellect: 'star', fireball: 'flame', frostbolt: 'flake', fire_blast: 'flame', arcane_missiles: 'star', frost_nova: 'flake',
   demon_skin: 'skull', shadow_bolt: 'orb', immolate: 'flame', corruption: 'swirl', life_tap: 'drops', curse_agony: 'skull',
   mark_wild: 'paw', wrath: 'leaf', healing_touch: 'leaf', moonfire: 'moon', rejuvenation: 'leaf', entangling_roots: 'leaf', starfire: 'star',
+  charge: 'arrow', hamstring: 'sword', bloodrage: 'drops', sunder_armor: 'axe', demoralizing_shout: 'horn', revenge: 'sword', shield_block: 'bubble',
+  cleave: 'axe', retaliation: 'sword', intimidating_shout: 'horn', shield_wall: 'bubble', slam: 'hammer', berserker_rage: 'fist', whirlwind: 'swirl',
+  recklessness: 'skull', sweeping_strikes: 'swirl', spearing_strike: 'arrow', mortal_strike: 'axe', piercing_howl: 'horn', death_wish: 'skull',
+  bloodthirst: 'drops', last_stand: 'cross', concussion_blow: 'hammer', shield_slam: 'bubble',
+  holy_strike: 'hammer', divine_protection: 'bubble', seal_crusader: 'sun', lay_on_hands: 'cross', blessing_wisdom: 'drops', retribution_aura: 'aura',
+  flash_of_light: 'cross', blessing_kings: 'star', seal_fury: 'sun', seal_light: 'sun', divine_shield: 'bubble', seal_wisdom: 'drops', hammer_wrath: 'hammer',
+  holy_wrath: 'sun', consecration: 'ring', voice_of_truth: 'horn', holy_shock: 'bolt', blessing_sanctuary: 'aura', holy_shield: 'bubble', templars_bulwark: 'bubble',
+  seal_command: 'sun', sanctity_aura: 'aura', repentance: 'stars',
+  aspect_monkey: 'paw', aspect_hawk: 'target', wing_clip: 'claw', mongoose_bite: 'claw', immolation_trap: 'flame', summon_hawk: 'arrow', freezing_trap: 'flake',
+  rapid_fire: 'arrows', explosive_trap: 'flame', volley: 'arrows', intimidation: 'paw', bestial_wrath: 'paw', aimed_shot: 'target', scatter_shot: 'stars',
+  trueshot_aura: 'aura', counterattack: 'claw', deterrence: 'wind', wyvern_sting: 'snake',
+  garrote: 'drops', expose_armor: 'dagger', ambush: 'dagger', rupture: 'drops', instant_poison: 'drops', cheap_shot: 'fist', kidney_shot: 'fist',
+  deadly_poison: 'drops', wound_poison: 'drops', blind: 'stars', cold_blood: 'skull', mutilate: 'dagger', venom: 'snake', riposte: 'dagger', blade_flurry: 'swirl',
+  adrenaline_rush: 'wind', ghostly_strike: 'skull', preparation: 'swirl', hemorrhage: 'drops',
+  desperate_prayer: 'cross', inner_fire: 'flame', psychic_scream: 'skull', heal: 'cross', flash_heal: 'cross', holy_fire: 'flame', fear_ward: 'bubble',
+  devouring_plague: 'skull', prayer_healing: 'cross', shadow_protection: 'bubble', greater_heal: 'cross', inner_focus: 'star', divine_spirit: 'star',
+  penance: 'sun', power_infusion: 'star', holy_nova: 'ring', prayer_mending: 'cross', lightwell: 'sun', mind_flay: 'swirl', silence: 'stars',
+  vampiric_embrace: 'drops', shadowform: 'skull',
+  stoneskin_totem: 'totem', lightning_shield: 'orb', strength_earth: 'totem', flametongue: 'flame', fire_nova: 'ring', frost_shock: 'flake',
+  frostbrand: 'flake', healing_stream: 'totem', lesser_healing_wave: 'wave', magma_totem: 'totem', mana_spring: 'totem', windfury: 'wind',
+  call_elements: 'totem', chain_lightning: 'bolt', windfury_totem: 'totem', totemic_projection: 'totem', chain_heal: 'wave', grace_of_air: 'totem',
+  lava_burst: 'flame', stormstrike: 'bolt', rage_farseer: 'wind', water_shield: 'bubble', natures_swiftness_sh: 'leaf', riptide: 'wave', mana_tide: 'totem',
+  polymorph: 'stars', arcane_explosion: 'ring', flamestrike: 'flame', blizzard: 'flake', mana_shield: 'bubble', evocation: 'swirl', scorch: 'flame',
+  cone_of_cold: 'flake', ice_armor: 'flake', arcane_blast: 'star', mage_armor: 'star', presence_of_mind: 'star', arcane_power: 'star', pyroblast: 'flame',
+  blast_wave: 'ring', combustion: 'flame', cold_snap: 'flake', ice_block: 'bubble', ice_barrier: 'bubble',
+  curse_weakness: 'skull', fear: 'skull', drain_soul: 'swirl', drain_life: 'drops', searing_pain: 'flame', rain_of_fire: 'flame', demon_armor: 'skull',
+  hellfire: 'flame', shadow_ward: 'bubble', howl_terror: 'horn', drain_hope: 'swirl', death_coil: 'skull', soul_fire: 'flame', amplify_curse: 'skull',
+  siphon_life: 'drops', dark_pact: 'drops', demonic_sacrifice: 'skull', soul_link: 'ring', shadowburn: 'skull', conflagrate: 'flame',
+  summon_imp: 'flame', summon_voidwalker: 'orb', summon_succubus: 'skull', summon_felhunter: 'paw',
+  thorns: 'leaf', bear_form: 'paw', maul: 'claw', demoralizing_roar: 'horn', enrage: 'drops', regrowth: 'leaf', bash: 'fist', swipe: 'claw',
+  faerie_fire: 'star', cat_form: 'paw', claw: 'claw', rip: 'drops', shred: 'claw', rake: 'claw', tigers_fury: 'paw', tranquility: 'leaf', ravage: 'claw',
+  ferocious_bite: 'claw', pounce: 'paw', frenzied_regen: 'cross', innervate: 'drops', hurricane: 'wind', barkskin: 'bubble', moonkin_form: 'moon',
+  feral_charge: 'paw', mangle: 'claw', leader_pack: 'aura', berserk: 'paw', insect_swarm: 'stars', natures_swiftness_dr: 'leaf', swiftmend: 'leaf',
+  rockbiter_weapon: 'rock',
 }
 
 function glyph(g: CanvasRenderingContext2D, kind: string, col: string) {

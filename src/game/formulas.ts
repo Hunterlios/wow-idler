@@ -32,9 +32,31 @@ export function knows(h: Hero, a: Ability, g = grants(h)) {
   return a.talent ? g.has(a.id) : (h.trained[a.id] ?? 0) > 0
 }
 export function formOk(h: Hero, a: Ability) {
-  if (h.cls !== 'druid' || !a.form || a.kind === 'form') return true
+  if (h.cls !== 'druid' || a.kind === 'form') return true
+  if (a.forms) return a.forms.includes(h.form) || (a.forms.includes('caster') && h.form === 'moonkin')
+  if (!a.form) return true
   if (a.form === 'caster') return h.form === 'caster' || h.form === 'moonkin'
   return a.form === h.form
+}
+// Grupy wyboru (nasycenie broni, pieczęć, aura, totem żywiołu...): aktywna tylko jedna umiejętność.
+// Gracz wybiera w księdze; bez wyboru bierzemy domyślną (gprio), a przy remisie najwyższy poziom.
+export function groupMembers(h: Hero, group: string, g = grants(h)) {
+  return classById(h.cls).abilities.filter((a) => a.group === group && knows(h, a, g))
+}
+export function chosenIn(h: Hero, group: string, g = grants(h)): string | null {
+  const pick = h.choice?.[group]
+  if (pick === 'none') return null
+  const known = groupMembers(h, group, g)
+  if (pick && known.some((a) => a.id === pick)) return pick
+  const best = [...known].sort((a, b) => (a.gprio ?? 50) - (b.gprio ?? 50) || b.lvl - a.lvl)[0]
+  return best?.id ?? null
+}
+export function groupOk(h: Hero, a: Ability, g = grants(h)) {
+  return !a.group || chosenIn(h, a.group, g) === a.id
+}
+// Umiejętność aktywna dla postaci: znana, niewyłączona, w dobrej formie i wybrana w swojej grupie
+export function active(h: Hero, a: Ability, g = grants(h)) {
+  return knows(h, a, g) && !h.disabled?.[a.id] && formOk(h, a) && groupOk(h, a, g)
 }
 export function resourceOf(h: Hero): Resource {
   if (h.cls === 'druid') return h.form === 'bear' ? 'rage' : h.form === 'cat' ? 'energy' : 'mana'
@@ -47,12 +69,13 @@ export function styleOf(h: Hero): 'melee' | 'ranged' | 'caster' {
 // pasywne buffy aktywne teraz: wytrenowane, niewyłączone, pasujące do formy (+ czasowe)
 export function activeBuffs(h: Hero, g = grants(h)): { a: Ability; fx: BuffFx; scale: number }[] {
   const out: { a: Ability; fx: BuffFx; scale: number }[] = []
+  const totems = new Set((h.totems ?? []).map((t) => t.id))
   for (const a of classById(h.cls).abilities) {
-    if (a.kind === 'buff' && a.buff && knows(h, a, g) && !h.disabled?.[a.id] && formOk(h, a)) {
-      const rank = a.talent ? h.level : h.trained[a.id] ?? h.level
-      out.push({ a, fx: a.buff, scale: 1 + rank / 12 })
-    }
-    if (a.kind === 'cooldown' && a.buff && (h.temp?.[a.id] ?? 0) > 0) out.push({ a, fx: a.buff, scale: 1 })
+    if (!a.buff) continue
+    const rank = a.talent ? h.level : h.trained[a.id] ?? h.level
+    if ((a.kind === 'buff' || a.kind === 'proc') && active(h, a, g)) out.push({ a, fx: a.buff, scale: 1 + rank / 12 })
+    else if (a.kind === 'totem') { if (totems.has(a.id)) out.push({ a, fx: a.buff, scale: 1 + rank / 12 }) }
+    else if (a.kind !== 'buff' && a.kind !== 'proc' && (h.temp?.[a.id] ?? 0) > 0) out.push({ a, fx: a.buff, scale: 1 })
   }
   return out
 }
@@ -76,7 +99,7 @@ export type Derived = Stats & {
   dr: (mobLvl: number) => number
 }
 
-const FLAT_SCALED = new Set(['ap', 'sta', 'int', 'spi', 'all'])
+const FLAT_SCALED = new Set(['ap', 'sta', 'int', 'spi', 'all', 'str', 'agi'])
 
 export function derive(h: Hero): Derived {
   const r = raceById(h.race)
@@ -85,22 +108,29 @@ export function derive(h: Hero): Derived {
   const g = grants(h)
   const tf = talentFx(h.cls, h.talents ?? {})
   const m: Mods = { ...tf }
-  const flat = { ap: 0, sta: 0, int: 0, spi: 0, all: 0 }
+  const flat = { ap: 0, sta: 0, int: 0, spi: 0, all: 0, str: 0, agi: 0 }
   let armorPct = tf.armor ?? 0
-  for (const { fx, scale } of activeBuffs(h, g)) {
+  let allPct = 0
+  const apply = (fx: BuffFx, scale: number) => {
     for (const [k, v] of Object.entries(fx)) {
       if (v == null) continue
       if (FLAT_SCALED.has(k)) flat[k as keyof typeof flat] += v * scale
       else if (k === 'armor') armorPct += v
+      else if (k === 'allPct') allPct += v
       else if (k === 'shadow') m['school:shadow'] = (m['school:shadow'] ?? 0) + v
       else m[k] = (m[k] ?? 0) + v
     }
   }
+  for (const { fx, scale } of activeBuffs(h, g)) apply(fx, scale)
+  if (h.wellFed && h.wellFed.left > 0) apply(h.wellFed.fx, 1)
+  if (tf.lonewolf && h.cls === 'hunter' && h.disabled?.pet) m.dmg = (m.dmg ?? 0) + tf.lonewolf
   const s: Stats = { str: 0, agi: 0, sta: 0, int: 0, spi: 0 }
   for (const k of Object.keys(s) as (keyof Stats)[]) s[k] = r.base[k] + c.bonus[k] + c.growth[k] * (L - 1) + flat.all
   s.sta += flat.sta
   s.int += flat.int
   s.spi += flat.spi
+  s.str += flat.str
+  s.agi += flat.agi
   let gearArmor = 0
   let weaponDps = 1 + 0.35 * L
   let weaponSpeed = c.style === 'ranged' ? 2.8 : 2.4
@@ -119,7 +149,7 @@ export function derive(h: Hero): Derived {
 
   if (r.mods.spiPct) s.spi *= 1 + r.mods.spiPct
   if (r.mods.intPct) s.int *= 1 + r.mods.intPct
-  const all = tf.allstat ?? 0
+  const all = (tf.allstat ?? 0) + allPct
   for (const k of Object.keys(s) as (keyof Stats)[]) s[k] = Math.round(s[k] * (1 + all + (tf[k] ?? 0)))
 
   let maxHp = c.hp[0] + c.hp[1] * (L - 1) + Math.min(20, s.sta) + 10 * Math.max(0, s.sta - 20)
@@ -129,7 +159,7 @@ export function derive(h: Hero): Derived {
 
   let ap = c.id === 'hunter' ? s.agi * 2 + L * 2 - 10 : c.id === 'rogue' || form === 'cat' ? s.str + s.agi + L * 2 - 20 : s.str * 2 + L * 3 - 20
   if (form === 'bear' || form === 'cat') ap += L * 3
-  ap += flat.ap
+  ap += flat.ap + s.int * (tf.intAp ?? 0)
   ap *= 1 + (tf.ap ?? 0)
   if ((h.buffs.bloodfury ?? 0) > 0) ap *= 1.25
   const armor = Math.round((gearArmor + s.agi * 2) * (1 + armorPct))
@@ -137,10 +167,10 @@ export function derive(h: Hero): Derived {
   const spellCrit = 0.01 + s.int / 60 / 100 + (m.spellCrit ?? 0)
   const dodge = 0.03 + s.agi / 20 / 100 + (r.mods.dodge ?? 0) + (m.dodge ?? 0)
   const primary = c.style === 'caster' || c.id === 'priest' ? s.int + s.spi * 0.3 : c.id === 'shaman' || c.id === 'paladin' ? s.int * 0.5 + s.str * 0.5 : s.agi
-  const spellMult = 1 + primary / 260
+  const spellMult = 1 + (primary + s.int * (tf.intSp ?? 0)) / 260
   const haste = 1 + (m.haste ?? 0) + ((h.buffs.berserking ?? 0) > 0 ? 0.15 : 0)
   const stoneform = (h.buffs.stoneform ?? 0) > 0 ? 0.2 : 0
-  const extraDr = Math.min(0.4, (m.dr ?? 0) + stoneform)
+  const extraDr = Math.min(0.5, (m.dr ?? 0) + stoneform)
   const dr = (mobLvl: number) => Math.min(0.8, armor / (armor + 400 + 85 * mobLvl) + extraDr)
   return { ...s, maxHp, maxRes, res, ap: Math.max(0, Math.round(ap)), armor, crit, spellCrit, dodge, weaponDps, weaponSpeed, spellMult, haste, m, dr }
 }

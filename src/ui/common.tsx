@@ -9,7 +9,8 @@ import { itemIcon } from '../render/icons'
 import { RARITY_COLOR, RARITY_PL, SLOT_PL, type Item, type Hero, type EquipSlot } from '../game/types'
 import type { RaceId } from '../data/races'
 import type { ClassId } from '../data/classes'
-import { canWear, displacedScore, itemScore } from '../game/items'
+import { canWear, displacedScore, itemScore, learnableWeapon } from '../game/items'
+import { beginItemDrag, type DragSrc } from './dnd'
 import type { Stats } from '../data/races'
 
 export function Money({ copper, className }: { copper: number; className?: string }) {
@@ -45,9 +46,18 @@ function TipBody({ item, hero, hint, header, diff }: { item: Item; hero?: Hero; 
     <div className="tooltip-body">
       {header && <div className="tt-header">{header}</div>}
       <div className="tt-name" style={{ color: RARITY_COLOR[item.rarity] }}>{item.name}</div>
+      {item.quest && <div>Quest Item</div>}
       {item.bagSize ? <div>{item.bagSize} Slot Bag</div> : item.slot ? (
         <div className="tt-row"><span>{SLOT_PL[item.slot]}</span><span style={{ color: wearable ? undefined : '#ff2020' }}>{item.weaponType ?? cap(item.armorType ?? '')}</span></div>
       ) : null}
+      {hero && learnableWeapon(hero, item) && <div style={{ color: '#ff2020' }}>Nie znasz tej broni — naucz się jej u Weapon Mastera w stolicy.</div>}
+      {item.food && (
+        <>
+          {item.food.lvl > 1 && <div style={{ color: hero && hero.level < item.food.lvl ? '#ff2020' : undefined }}>Requires Level {item.food.lvl}</div>}
+          <div className="tt-use">{item.food.kind === 'buff' ? `Use: ${item.food.buff!.name} — ${item.food.buff!.text} przez 15 min. Tylko jeden naraz.` : item.food.kind === 'food' ? `Use: odnawia ${item.food.amt} zdrowia podczas odpoczynku.` : `Use: odnawia ${item.food.amt} many podczas odpoczynku.`}</div>
+          {item.food.kind !== 'buff' && <div className="tt-dim">Postać zjada je sama, gdy odpoczywa.</div>}
+        </>
+      )}
       {item.dps != null && (
         <>
           <div className="tt-row"><span>{Math.round(item.dps * (item.speed ?? 2) * 0.8)} - {Math.round(item.dps * (item.speed ?? 2) * 1.2)} Damage</span><span>Speed {item.speed?.toFixed(2)}</span></div>
@@ -56,7 +66,7 @@ function TipBody({ item, hero, hint, header, diff }: { item: Item; hero?: Hero; 
       )}
       {item.armor != null && <div>{item.armor} Armor</div>}
       {Object.entries(item.stats ?? {}).map(([k, v]) => <div key={k}>+{v} {STAT_PL[k]}</div>)}
-      {!item.slot && !item.bagSize && <div className="tt-dim">Śmieć do sprzedania u kupca.</div>}
+      {!item.slot && !item.bagSize && !item.food && !item.quest && <div className="tt-dim">Śmieć do sprzedania u kupca.</div>}
       {item.slot && item.rarity > 0 && <div className="tt-dim">Item Level {item.ilvl}</div>}
       {diff && diff.length > 0 && (
         <div className="tt-diff">
@@ -64,7 +74,7 @@ function TipBody({ item, hero, hint, header, diff }: { item: Item; hero?: Hero; 
           {diff.map(([k, v]) => <div key={k} style={{ color: v > 0 ? '#40ff40' : '#ff5050' }}>{v > 0 ? '+' : ''}{k === 'dps' ? v.toFixed(1) : Math.round(v)} {k === 'dps' ? 'DPS' : k === 'armor' ? 'Armor' : STAT_PL[k]}</div>)}
         </div>
       )}
-      <div className="tt-row tt-sell"><span>Sell Price{(item.count ?? 1) > 1 ? ` (×${item.count})` : ''}:</span><Money copper={item.value * (item.count ?? 1)} /></div>
+      {item.quest ? <div className="tt-dim">Liczy się do zadania, dopóki jest w torbach.</div> : <div className="tt-row tt-sell"><span>Sell Price{(item.count ?? 1) > 1 ? ` (×${item.count})` : ''}:</span><Money copper={item.value * (item.count ?? 1)} /></div>}
       <div className="tt-dim small">{RARITY_PL[item.rarity]}{hint ? ` · ${hint}` : ''}</div>
     </div>
   )
@@ -108,7 +118,7 @@ export function ItemTooltip({ item, hero, hint, compare = true }: { item: Item; 
 }
 
 // Tooltip: podąża za kursorem albo (anchor="above") wisi nad elementem jak w grze
-export function Hover({ tip, children, className, style, onClick, onContextMenu, anchor }: { tip: ReactNode; children: ReactNode; className?: string; style?: React.CSSProperties; onClick?: () => void; onContextMenu?: () => void; anchor?: 'above' }) {
+export function Hover({ tip, children, className, style, onClick, onContextMenu, anchor, onPointerDown, drop }: { tip: ReactNode; children: ReactNode; className?: string; style?: React.CSSProperties; onClick?: () => void; onContextMenu?: () => void; anchor?: 'above'; onPointerDown?: (e: any) => void; drop?: string }) {
   const [pos, setPos] = useState<{ x: number; y: number; r?: DOMRect } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
@@ -126,7 +136,7 @@ export function Hover({ tip, children, className, style, onClick, onContextMenu,
     }
   }
   return (
-    <div ref={ref} className={className} style={style}
+    <div ref={ref} className={className} style={style} data-drop={drop} onPointerDown={onPointerDown}
       onMouseEnter={(e) => setPos({ x: e.clientX, y: e.clientY, r: ref.current?.getBoundingClientRect() })}
       onMouseMove={(e) => { if (anchor !== 'above') setPos({ x: e.clientX, y: e.clientY }) }}
       onMouseLeave={() => setPos(null)}
@@ -137,10 +147,13 @@ export function Hover({ tip, children, className, style, onClick, onContextMenu,
   )
 }
 
-// Slot z ikoną przedmiotu (torby, okno postaci)
-export function ItemSlotBox({ item, hero, empty, onClick, hint, size = 38 }: { item?: Item | null; hero?: Hero; empty?: string; onClick?: () => void; hint?: string; size?: number }) {
+// Slot z ikoną przedmiotu (torby, okno postaci). drag = źródło przeciągania, drop = cel upuszczenia,
+// onRight = prawy przycisk (załóż / zdejmij / sprzedaj / użyj)
+export function ItemSlotBox({ item, hero, empty, onClick, onRight, hint, size = 38, drag, drop, dim }: { item?: Item | null; hero?: Hero; empty?: string; onClick?: () => void; onRight?: () => void; hint?: string; size?: number; drag?: DragSrc; drop?: string; dim?: boolean }) {
+  const unusable = item && hero && item.slot && !canWear(hero, item)
   return (
-    <Hover className={`islot ${item ? `q${item.rarity}` : 'empty'}`} style={{ width: size, height: size }} onClick={onClick} onContextMenu={onClick}
+    <Hover className={`islot ${item ? `q${item.rarity}` : 'empty'} ${unusable ? 'unusable' : ''} ${dim ? 'dim' : ''}`} style={{ width: size, height: size }} onClick={onClick} onContextMenu={onRight ?? onClick} drop={drop}
+      onPointerDown={item && drag ? (e) => beginItemDrag(e, drag, itemIcon(item)) : undefined}
       tip={item ? <ItemTooltip item={item} hero={hero} hint={hint} /> : empty ? <div className="tooltip-body"><div className="tt-dim">{empty}</div></div> : null}>
       {item ? <img src={itemIcon(item)} alt="" draggable={false} /> : empty ? <span className="islot-empty">{empty.slice(0, 1)}</span> : null}
       {item?.bagSize ? <span className="islot-count">{item.bagSize}</span> : (item?.count ?? 1) > 1 ? <span className="islot-count">{item!.count}</span> : null}

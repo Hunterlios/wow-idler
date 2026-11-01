@@ -1,18 +1,19 @@
 import { useState } from 'react'
-import { TALENTS, talentPoints, spentIn, spentTotal, canLearnTalent, respecCost } from '../data/talents'
+import { TALENTS, TALENT_COLS, talentPoints, spentIn, spentTotal, canLearnTalent, respecCost } from '../data/talents'
 import { learnTalent, autoTalents, resetTalents } from '../game/talents'
-import { grants, knows, formOk } from '../game/formulas'
+import { grants, knows, formOk, chosenIn } from '../game/formulas'
 import { layout, saveLayout, startDrag, uiScale } from './layout'
-import { classById, ranksOf, trainCost } from '../data/classes'
+import { classById, ranksOf, trainCost, isMelee, WEAPON_SKILL_PL, type Ability } from '../data/classes'
 import { raceById } from '../data/races'
 import { zoneById } from '../data/zones'
-import { stats, activePet, costOf } from '../game/sim'
+import { stats, costOf, cdOf } from '../game/sim'
 import { exportSave, importSave } from '../game/save'
 import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, type EquipSlot, type GameState, type Quest } from '../game/types'
-import { segmentsOf, equipFromInv, unequip, unequipBag, BACKPACK, capacity, usedSlots } from '../game/inventory'
+import { segmentsOf, equipFromInv, unequip, sortBags, BACKPACK, capacity, usedSlots } from '../game/inventory'
+import { rightClickInv, rightClickEquip } from './itemActions'
 import { boardFor, acceptQuest, abandonQuest, questReady, questXp, MAX_QUESTS } from '../game/quests'
-import { trainerRows, train, trainAll, sellAt, sellJunk, buyBag, turnIn, placeName } from '../game/town'
-import { BAGS_FOR_SALE, canWear, targetSlot } from '../game/items'
+import { trainerRows, train, trainAll, sellJunk, buyBag, turnIn, placeName, buyBack, buyFood, restock, weaponRows, trainWeapon } from '../game/town'
+import { BAGS_FOR_SALE, FOODS, canWear, makeFood } from '../game/items'
 import { townOf, capitalOf } from '../game/world'
 import { abilityIcon, itemIcon, menuIcon, talentIcon } from '../render/icons'
 import { Frame, Hover, ItemSlotBox, ItemTooltip, Money, Portrait } from './common'
@@ -22,6 +23,8 @@ type Act = { bump: () => void; toast: (t: string, c?: string) => void }
 
 // ---------------------------------------------------------------- Postać
 const SLOT_KIND: Partial<Record<EquipSlot, string[]>> = { finger1: ['finger'], finger2: ['finger'], trinket1: ['trinket'], trinket2: ['trinket'], mainhand: ['mainhand', 'twohand'] }
+type Res = { msg: string; color?: string } | null
+const report = (toast: Act['toast'], r: Res) => { if (r) toast(r.msg, r.color) }
 export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onClose: () => void } & Act) {
   const h = s.hero
   const c = classById(h.cls)
@@ -32,14 +35,17 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
   const fits = (sl: EquipSlot) => h.inv.map((it, i) => ({ it, i })).filter(({ it }) => it && it.slot && (SLOT_KIND[sl] ?? [sl]).includes(it.slot) && canWear(h, it))
   const slot = (sl: EquipSlot) => (
     <div key={sl} className={`pd-slot ${fly === sl ? 'open' : ''}`}>
-      <ItemSlotBox item={h.equip[sl]} hero={h} empty={SLOT_PL[sl]} hint="kliknij: zmień / zdejmij" onClick={() => setFly(fly === sl ? null : sl)} />
+      <ItemSlotBox item={h.equip[sl]} hero={h} empty={SLOT_PL[sl]} hint="przeciągnij do torby lub PPM: zdejmij · klik: wybierz z toreb" drag={{ k: 'eq', slot: sl }} drop={`eq:${sl}`}
+        onClick={() => setFly(fly === sl ? null : sl)} onRight={() => { report(toast, rightClickEquip(s, sl)); bump() }} />
       {fits(sl).length > 0 && <span className="pd-has">{fits(sl).length}</span>}
     </div>
   )
   const opts = fly ? fits(fly) : []
+  const tip = statTips(h, d)
+  const known = h.weaponSkills.map((w) => WEAPON_SKILL_PL[w] ?? w)
   return (
     <Frame id="char" title={h.name} onClose={onClose} className="char-frame" icon={menuIcon('char')}>
-      <div className="char-sub">Level {h.level} {r.name} <span style={{ color: c.color }}>{c.name}</span>{h.cls === 'druid' && h.form !== 'caster' ? ` · ${h.form === 'bear' ? 'Bear Form' : h.form === 'cat' ? 'Cat Form' : 'Moonkin Form'}` : ''}</div>
+      <div className="char-sub">Level {h.level} {r.name} <span style={{ color: c.color }}>{c.name}</span>{h.cls === 'druid' && h.form !== 'caster' ? ` · ${h.form === 'bear' ? 'Bear Form' : h.form === 'cat' ? 'Cat Form' : 'Moonkin Form'}` : ''}{h.wellFed ? <span className="wellfed"> · Well Fed ({Math.ceil(h.wellFed.left / 60)} min)</span> : null}</div>
       <div className="paperdoll">
         <div className="pd-col">{LEFT_SLOTS.map(slot)}</div>
         <div className="pd-model">
@@ -68,18 +74,59 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
       <div className="pd-weapons">{WEAPON_SLOTS.map(slot)}</div>
       <div className="char-stats">
         <div className="stat-box">
-          <Row k="Strength" v={d.str} /><Row k="Agility" v={d.agi} /><Row k="Stamina" v={d.sta} /><Row k="Intellect" v={d.int} /><Row k="Spirit" v={d.spi} /><Row k="Armor" v={d.armor} />
+          <Row k="Strength" v={d.str} tip={tip.str} /><Row k="Agility" v={d.agi} tip={tip.agi} /><Row k="Stamina" v={d.sta} tip={tip.sta} /><Row k="Intellect" v={d.int} tip={tip.int} /><Row k="Spirit" v={d.spi} tip={tip.spi} /><Row k="Armor" v={d.armor} tip={tip.armor} />
         </div>
         <div className="stat-box">
-          <Row k="Health" v={d.maxHp} /><Row k={d.res === 'mana' ? 'Mana' : d.res === 'rage' ? 'Rage' : 'Energy'} v={d.maxRes} />
-          <Row k="Attack Power" v={d.ap} /><Row k="Crit" v={pct(d.crit)} /><Row k="Spell Crit" v={pct(d.spellCrit)} /><Row k="Dodge" v={pct(Math.min(0.75, d.dodge))} />
+          <Row k="Health" v={d.maxHp} tip={tip.hp} /><Row k={d.res === 'mana' ? 'Mana' : d.res === 'rage' ? 'Rage' : 'Energy'} v={d.maxRes} tip={tip.res} />
+          <Row k="Attack Power" v={d.ap} tip={tip.ap} /><Row k="Crit" v={pct(d.crit)} tip={tip.crit} /><Row k="Spell Crit" v={pct(d.spellCrit)} tip={tip.spellCrit} /><Row k="Dodge" v={pct(Math.min(0.75, d.dodge))} tip={tip.dodge} />
         </div>
       </div>
+      <Hover className="weapon-skills" tip={<div className="tooltip-body"><div className="tt-name">Umiejętności broni</div><div>{known.join(', ')}</div><div className="tt-dim">Kolejnych typów nauczysz się u Weapon Mastera w stolicy.</div></div>}>
+        <span className="dim small">Broń: {known.join(', ')}</span>
+      </Hover>
       <label className="auto-eq"><input type="checkbox" checked={s.autoEquip} onChange={(e) => { s.autoEquip = e.target.checked; bump() }} /> Automatycznie zakładaj lepsze przedmioty z łupu</label>
     </Frame>
   )
 }
-const Row = ({ k, v }: { k: string; v: number | string }) => <div className="srow"><span>{k}:</span><b>{v}</b></div>
+const Row = ({ k, v, tip }: { k: string; v: number | string; tip?: string[] }) => (
+  <Hover className="srow" tip={tip ? <div className="tooltip-body"><div className="tt-name">{k} {v}</div>{tip.map((t, i) => <div key={i} className={i ? 'tt-dim' : ''}>{t}</div>)}</div> : null}>
+    <span>{k}:</span><b>{v}</b>
+  </Hover>
+)
+
+// Objaśnienia atrybutów (jak tooltipy w oknie postaci w grze), liczone tymi samymi wzorami co symulacja
+function statTips(h: GameState['hero'], d: ReturnType<typeof stats>): Record<string, string[]> {
+  const c = classById(h.cls)
+  const L = h.level
+  const cat = h.cls === 'druid' && h.form === 'cat'
+  const f1 = (x: number) => (x * 100).toFixed(2) + '%'
+  const apStr = h.cls === 'hunter' ? 0 : h.cls === 'rogue' || cat ? 1 : 2
+  const apAgi = h.cls === 'hunter' ? 2 : h.cls === 'rogue' || cat ? 1 : 0
+  const critDiv = h.cls === 'rogue' || h.cls === 'hunter' || cat ? 29 : 20
+  const hpMul = 1 + (L / 60) * 0.7
+  const staHp = Math.round((Math.min(20, d.sta) + 10 * Math.max(0, d.sta - 20)) * hpMul)
+  const intMana = Math.min(20, d.int) + 15 * Math.max(0, d.int - 20)
+  const perTick = h.cls === 'mage' || h.cls === 'priest' ? 12.5 + d.spi / 4 : 15 + d.spi / 5
+  const inCombat = Math.min(1, (d.m.regen ?? 0) + (d.m.castRegen ?? 0))
+  const drL = d.dr(L), drUp = d.dr(L + 3)
+  const armorOnly = (lvl: number) => d.armor / (d.armor + 400 + 85 * lvl)
+  const caster = c.style === 'caster' || h.cls === 'priest'
+  const hybrid = h.cls === 'shaman' || h.cls === 'paladin'
+  return {
+    str: [apStr ? `Zwiększa siłę ataku o ${Math.round(d.str * apStr)} (${apStr} AP za punkt).` : 'Twoja klasa nie zyskuje siły ataku z Strength.', ...(hybrid ? ['Połowa Strength i Intellect wzmacnia też czary.'] : [])],
+    agi: [`Trafienia krytyczne: +${f1(d.agi / critDiv / 100)}.`, `Unik: +${f1(d.agi / 20 / 100)}.`, `Pancerz: +${d.agi * 2}.`, ...(apAgi ? [`Siła ataku: +${d.agi * apAgi}.`] : []), ...(c.style === 'ranged' || h.cls === 'rogue' ? ['Wzmacnia też umiejętności (główny atrybut).'] : [])],
+    sta: [`Zwiększa zdrowie o ${staHp} (10 HP za punkt powyżej 20, rośnie z poziomem).`],
+    int: [...(d.res === 'mana' || c.resource === 'mana' ? [`Mana: +${intMana} (15 za punkt powyżej 20).`] : ['Twoja klasa nie używa many.']), `Krytyki czarów: +${f1(d.int / 60 / 100)}.`, ...(caster ? [`Moc czarów: +${Math.round(((d.int + d.spi * 0.3) / 260) * 100)}%.`] : [])],
+    spi: [c.resource === 'mana' || h.cls === 'druid' ? `Regeneracja many poza walką: ${(perTick / 2).toFixed(1)} na sekundę.` : 'Spirit przyspiesza odpoczynek.', inCombat > 0 ? `W walce: ${Math.round(inCombat * 100)}% tej regeneracji.` : 'W walce (5 s po czarze) mana się nie odnawia.'],
+    armor: [`Zmniejsza obrażenia fizyczne od wroga na twoim poziomie (${L}) o ${f1(armorOnly(L))}.`, `Przeciw wrogowi +3 poziomy: ${f1(armorOnly(L + 3))}.`, ...(drL > armorOnly(L) + 0.001 ? [`Razem z talentami i buffami: ${f1(drL)} (wróg +3: ${f1(drUp)}).`] : [])],
+    hp: [`Ze Stamina: ${staHp}. Reszta z klasy i poziomu.`, 'Zdrowie odnawiasz jedząc podczas odpoczynku.'],
+    res: d.res === 'mana' ? [`Z Intellect: ${intMana}.`, 'Manę odnawiasz pijąc podczas odpoczynku.'] : d.res === 'rage' ? ['Rage rośnie, gdy zadajesz i otrzymujesz ciosy; poza walką opada.'] : ['Energy odnawia się 10 na sekundę.'],
+    ap: [`Zwiększa obrażenia broni o ${(d.ap / 14).toFixed(1)} DPS.`, `Broń: ${d.weaponDps.toFixed(1)} DPS, szybkość ${d.weaponSpeed.toFixed(2)}.`],
+    crit: ['Szansa na podwójne obrażenia ciosów i strzałów.', `Z Agility: ${f1(d.agi / critDiv / 100)}, baza 5%, reszta z talentów i buffów.`],
+    spellCrit: ['Szansa na 150% obrażeń / leczenia czarem.', `Z Intellect: ${f1(d.int / 60 / 100)}.`],
+    dodge: ['Szansa na uniknięcie ciosu wroga (maks. 75%).', `Z Agility: ${f1(d.agi / 20 / 100)}.`],
+  }
+}
 
 // ---------------------------------------------------------------- Torby
 export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: () => void } & Act) {
@@ -90,7 +137,7 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
   const vendor = s.where === 'capital'
   let base = 0
   const blocks = segs.map((seg, i) => {
-    const off = base
+    const start = base
     base += i === 0 ? BACKPACK : h.bags[i - 1]?.bagSize ?? 0
     if (i > 0 && !h.bags[i - 1]) return null
     const name = i === 0 ? 'Backpack' : h.bags[i - 1]!.name
@@ -98,20 +145,16 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
       <div key={i} className="bagwin" data-solid>
         <div className="bagwin-head" onPointerDown={(e) => { if ((e.target as HTMLElement).closest('button')) return; const base = offRef.current; startDrag(e, (dx, dy) => setOff({ dx: base.dx + dx / uiScale(), dy: base.dy + dy / uiScale() }), () => saveLayout({ frames: { ...layout().frames, bags: offRef.current } })) }}>
           <img src={itemIcon(i === 0 ? { id: -1, name: 'Backpack', rarity: 1, ilvl: 1, value: 0, bagSize: 16 } : h.bags[i - 1]!)} alt="" draggable={false} /><span>{name}</span>
-          {i > 0 && <button className="wbtn small" title="" onClick={() => { const e = unequipBag(h, i - 1); if (e) toast(e, '#ff4040'); else toast(`${name} zdjęta do plecaka${vendor ? ' — możesz ją sprzedać' : ''}`, '#fff'); bump() }}>Zdejmij</button>}
+          {i === 0 && <button className="wbtn small" title="Sortuj torby" onClick={() => { sortBags(h); bump() }}>Sortuj</button>}
           {i === 0 && <button className="wclose" onClick={onClose}>✕</button>}
         </div>
         <div className="bagwin-grid">
-          {seg.map((it, k) => (
-            <ItemSlotBox key={k} item={it} hero={h} hint={vendor ? 'kliknij, aby sprzedać' : it?.slot || it?.bagSize ? 'kliknij, aby założyć' : undefined}
-              onClick={() => {
-                if (!it) return
-                const idx = off + k
-                if (vendor) { const v = sellAt(s, idx); toast(`Sprzedano za ${(v / 100).toFixed(2)} s`, '#ffffff') }
-                else { const e = equipFromInv(h, idx); if (e) toast(e, '#ff4040') }
-                bump()
-              }} />
-          ))}
+          {seg.map((it, k) => {
+            const idx = start + k
+            const hint = vendor ? (it?.quest ? 'przedmiot zadania' : 'PPM: sprzedaj · przeciągnij do kupca') : it?.food?.kind === 'buff' ? 'PPM: zjedz' : it?.slot || it?.bagSize ? 'PPM: załóż · przeciągnij' : 'przeciągnij, aby przenieść'
+            return <ItemSlotBox key={k} item={it} hero={h} hint={it ? hint : undefined} drag={{ k: 'inv', idx }} drop={`inv:${idx}`}
+              onRight={() => { report(toast, rightClickInv(s, idx)); bump() }} />
+          })}
         </div>
         {i === 0 && (
           <div className="bagwin-foot">
@@ -168,8 +211,9 @@ export function QuestLog({ s, onClose, bump }: { s: GameState; onClose: () => vo
 // ---------------------------------------------------------------- Miasto / stolica
 export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: () => void } & Act) {
   const capital = s.where === 'capital'
-  const [tab, setTab] = useState<'quests' | 'trainer' | 'vendor'>(capital ? 'trainer' : 'quests')
-  const tabs: ['quests' | 'trainer' | 'vendor', string][] = capital ? [['trainer', 'Trener'], ['vendor', 'Kupiec']] : [['quests', 'Zadania'], ['trainer', 'Trener']]
+  type Tab = 'quests' | 'trainer' | 'vendor' | 'weapons'
+  const [tab, setTab] = useState<Tab>(capital ? 'vendor' : 'quests')
+  const tabs: [Tab, string][] = capital ? [['vendor', 'Kupiec'], ['trainer', 'Trener'], ['weapons', 'Weapon Master']] : [['quests', 'Zadania'], ['trainer', 'Trener']]
   return (
     <Frame id="city" title={placeName(s)} onClose={onLeave} className="city-frame" icon={menuIcon(capital ? 'capital' : 'town')}>
       <div className="tabs">
@@ -179,6 +223,7 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
       {tab === 'quests' && <QuestBoard s={s} bump={bump} toast={toast} />}
       {tab === 'trainer' && <Trainer s={s} bump={bump} toast={toast} />}
       {tab === 'vendor' && <Vendor s={s} bump={bump} toast={toast} />}
+      {tab === 'weapons' && <WeaponMaster s={s} bump={bump} toast={toast} />}
       {!capital && <div className="dim small">Kupiec jest tylko w stolicy ({capitalOf(s)}).</div>}
     </Frame>
   )
@@ -246,27 +291,96 @@ function Trainer({ s, bump, toast }: { s: GameState } & Act) {
 
 function Vendor({ s, bump, toast }: { s: GameState } & Act) {
   const h = s.hero
+  const [sub, setSub] = useState<'goods' | 'bags' | 'buyback'>('goods')
   const junk = h.inv.filter((x) => x && x.rarity === 0).reduce((a, x) => a + x!.value * (x!.count ?? 1), 0)
+  const have = (name: string) => h.inv.reduce((a, x) => a + (x?.name === name ? x.count ?? 1 : 0), 0)
+  // jak u kupca w grze: towar na twój poziom (dwa najlepsze z każdego rodzaju) + następny do odblokowania
+  const kinds = classById(h.cls).resource === 'mana' || h.cls === 'druid' ? (['food', 'drink', 'buff'] as const) : (['food', 'buff'] as const)
+  const goods = kinds.flatMap((k) => {
+    const all = FOODS.filter((f) => f.kind === k)
+    const ok = all.filter((f) => f.lvl <= h.level).slice(k === 'buff' ? -2 : -1)
+    const next = all.find((f) => f.lvl > h.level)
+    return next ? [...ok, next] : ok
+  })
+  const buy = (name: string, n: number) => { const e = buyFood(s, name, n); if (e) toast(e, '#ff4040'); bump() }
   return (
-    <div className="parchment vendor">
+    <div className="parchment vendor" data-drop="vendor">
       <div className="tr-head"><span>General Goods</span><span><Money copper={h.copper} /></span></div>
-      <div className="pdim">Kliknij przedmiot w torbach, żeby go sprzedać.</div>
+      <div className="pdim">Sprzedaż: prawy przycisk na przedmiocie w torbie albo przeciągnij go tutaj.</div>
       <div className="vend-actions">
         <button className="wbtn" disabled={!junk} onClick={() => { const v = sellJunk(s); toast(`Sprzedano śmieci za ${(v / 100).toFixed(2)} s`, '#fff'); bump() }}>Sprzedaj szare (<Money copper={junk} />)</button>
+        <button className="wbtn" onClick={() => { const v = restock(s, 1); toast(v ? 'Uzupełniono jedzenie i picie' : 'Masz już zapas (albo brak pieniędzy)', '#fff'); bump() }}>Uzupełnij jedzenie i picie</button>
       </div>
-      <div className="board-sec">Torby</div>
-      {BAGS_FOR_SALE.map((b) => (
+      <div className="tabs small">
+        {([['goods', 'Jedzenie i picie'], ['bags', 'Torby'], ['buyback', `Odkup (${s.buyback.length})`]] as const).map(([k, l]) => <button key={k} className={`tab ${sub === k ? 'on' : ''}`} onClick={() => setSub(k)}>{l}</button>)}
+      </div>
+      {sub === 'goods' && goods.map((f) => {
+        const locked = f.lvl > h.level
+        const it = makeFood(-3, f)
+        return (
+          <div key={f.name} className={`tr-row ${locked ? 'locked' : 'available'}`}>
+            <ItemSlotBox item={it} hero={h} size={32} />
+            <div className="tr-main"><b>{f.name}</b> <span className="pdim">{f.kind === 'food' ? 'Jedzenie' : f.kind === 'drink' ? 'Picie' : 'Jedzenie z buffem'} · poz. {f.lvl}{have(f.name) ? ` · masz ${have(f.name)}` : ''}</span>
+              <div className="pdim">{f.kind === 'buff' ? `${f.buff!.text} (15 min, PPM w torbie)` : `${f.amt} ${f.kind === 'food' ? 'zdrowia' : 'many'} przy odpoczynku`}</div></div>
+            <span className="vend-buy">
+              <Money copper={f.price} />
+              {[1, 5, 20].map((n) => <button key={n} className="wbtn small" disabled={h.copper < f.price * n} onClick={() => buy(f.name, n)}>×{n}</button>)}
+            </span>
+          </div>
+        )
+      })}
+      {sub === 'bags' && BAGS_FOR_SALE.map((b) => (
         <div key={b.size} className="tr-row available">
           <img src={itemIcon({ id: -2, name: b.name, rarity: 1, ilvl: 1, value: 0, bagSize: b.size })} alt="" />
           <div className="tr-main"><b>{b.name}</b><div className="pdim">{b.size} Slot Bag</div></div>
           <button className="wbtn" disabled={h.copper < b.price} onClick={() => { const e = buyBag(s, b.size); if (e) toast(e, '#ff4040'); bump() }}>Kup <Money copper={b.price} /></button>
         </div>
       ))}
+      {sub === 'buyback' && (
+        <>
+          {!s.buyback.length && <div className="pdim">Nic jeszcze nie sprzedano. Tu trafia 10 ostatnio sprzedanych przedmiotów.</div>}
+          {s.buyback.map((it, i) => (
+            <div key={`${it.id}-${i}`} className="tr-row available">
+              <ItemSlotBox item={it} hero={h} size={32} />
+              <div className="tr-main"><b style={{ color: ['#9d9d9d', '#333', '#1e8a00', '#0050a0', '#7a2aa0'][it.rarity] }}>{it.name}</b>{(it.count ?? 1) > 1 && <span className="pdim"> ×{it.count}</span>}</div>
+              <button className="wbtn" disabled={h.copper < it.value * (it.count ?? 1)} onClick={() => { const e = buyBack(s, i); if (e) toast(e, '#ff4040'); bump() }}>Odkup <Money copper={it.value * (it.count ?? 1)} /></button>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }
 
+function WeaponMaster({ s, bump, toast }: { s: GameState } & Act) {
+  const h = s.hero
+  const rows = weaponRows(s)
+  return (
+    <div className="parchment trainer">
+      <div className="tr-head"><span>Weapon Master</span><span>Twoje pieniądze: <Money copper={h.copper} /></span></div>
+      <div className="pdim">Typy broni, których {classById(h.cls).name} może się nauczyć (jak w WoW Classic). Bez umiejętności nie założysz takiej broni.</div>
+      <div className="tr-list">
+        {rows.map((r) => (
+          <div key={r.type} className={`tr-row ${r.status}`}>
+            <img src={itemIcon({ id: -4, name: r.type, rarity: 1, ilvl: 1, value: 0, slot: RANGED_TYPES.includes(r.type) ? 'ranged' : 'mainhand', weaponType: r.type })} alt="" />
+            <div className="tr-main"><b>{r.name}</b>{r.status === 'locked' && <span className="pdim"> · od poziomu {r.lvl}</span>}</div>
+            {r.status === 'known' ? <span className="pdim">Znane</span> : (
+              <button className="wbtn" disabled={r.status !== 'available' || h.copper < r.cost} onClick={() => { const e = trainWeapon(s, r.type); if (e) toast(e, '#ff4040'); bump() }}>Ucz <Money copper={r.cost} /></button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+const RANGED_TYPES = ['Bow', 'Gun', 'Crossbow', 'Thrown', 'Wand']
+
 // ---------------------------------------------------------------- Księga umiejętności (wybór skilli)
+const GROUP_PL: Record<string, string> = {
+  imbue: 'Nasycenie broni (tylko jedno naraz)', seal: 'Pieczęć', aura: 'Aura', blessing: 'Błogosławieństwo', aspect: 'Aspekt', armor: 'Pancerz',
+  curse: 'Klątwa', shout: 'Okrzyk', eshield: 'Tarcza żywiołu (tylko jedna)', 'totem:earth': 'Totem ziemi', 'totem:fire': 'Totem ognia',
+  'totem:water': 'Totem wody', 'totem:air': 'Totem powietrza',
+}
 export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => void; bump: () => void }) {
   const h = s.hero
   const c = classById(h.cls)
@@ -275,9 +389,11 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
   const known = c.abilities.filter((a) => knows(h, a, g))
   const forms = known.filter((a) => a.kind === 'form')
   const pets = known.filter((a) => a.kind === 'summon')
-  const rest = known.filter((a) => a.kind !== 'form' && a.kind !== 'summon')
+  const groups = [...new Set(known.filter((a) => a.group).map((a) => a.group!))]
+  const rest = known.filter((a) => a.kind !== 'form' && a.kind !== 'summon' && !a.group)
   const locked = c.abilities.filter((a) => !knows(h, a, g) && a.kind !== 'form' && a.kind !== 'summon')
   const toggle = (id: string) => { if (h.disabled[id]) delete h.disabled[id]; else h.disabled[id] = true; bump() }
+  const tipOf = (a: Ability, wrongForm = false) => <div className="tooltip-body"><div className="tt-name">{a.name}</div><div>{a.desc}</div>{a.cost ? <div className="tt-dim">{costOf(h, a, d)} {d.res}</div> : null}{a.cd ? <div className="tt-dim">Cooldown {cdOf(a, d)} s</div> : null}{a.cast ? <div className="tt-dim">Rzucanie {a.cast} s</div> : null}{a.aoe ? <div className="tt-dim">Obszarowe: trafia całą grupę</div> : null}{isMelee(a) ? <div className="tt-dim">Wymaga zwarcia</div> : null}{wrongForm ? <div className="tt-dim">Działa tylko w formie: {a.form ?? a.forms?.join('/')}</div> : null}</div>
   return (
     <Frame id="spells" title="Spellbook" onClose={onClose} className="spell-frame" icon={menuIcon('spell')}>
       <div className="parchment spells">
@@ -298,16 +414,42 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
             </div>
           </div>
         )}
+        {h.cls === 'hunter' && h.level >= 10 && (
+          <div className="sp-group">
+            <div className="board-sec">Pupil</div>
+            <div className="sp-forms">
+              <label><input type="radio" checked={!h.disabled.pet} onChange={() => { delete h.disabled.pet; bump() }} /> Oswojona bestia walczy z tobą</label>
+              <label><input type="radio" checked={!!h.disabled.pet} onChange={() => { h.disabled.pet = true; bump() }} /> Bez pupila <span className="pdim">(talent Lone Wolf: +20% obrażeń)</span></label>
+            </div>
+          </div>
+        )}
+        {groups.map((gr) => {
+          const members = known.filter((a) => a.group === gr)
+          const cur = chosenIn(h, gr, g)
+          return (
+            <div key={gr} className="sp-group">
+              <div className="board-sec">{GROUP_PL[gr] ?? gr}</div>
+              <div className="sp-choice">
+                {members.map((a) => (
+                  <Hover key={a.id} className={`sp-opt ${cur === a.id ? 'on' : ''}`} onClick={() => { h.choice[gr] = a.id; bump() }} tip={tipOf(a, !formOk(h, a))}>
+                    <img src={abilityIcon(a, h.cls)} alt="" draggable={false} /><span>{a.name.replace(' Weapon', '').replace(' Totem', '')}</span>
+                  </Hover>
+                ))}
+                <div className={`sp-opt none ${cur === null ? 'on' : ''}`} onClick={() => { h.choice[gr] = 'none'; bump() }}><span>— żadne</span></div>
+              </div>
+              {gr.startsWith('totem:') && <div className="pdim small">Totem stawiasz na początku walki; znika, gdy odchodzisz do kolejnego wroga.</div>}
+            </div>
+          )
+        })}
         <div className="board-sec">Umiejętności — odznacz, żeby postać ich nie używała</div>
         {rest.map((a) => {
           const off = !!h.disabled[a.id]
           const wrongForm = !formOk(h, a)
           return (
-            <Hover key={a.id} className={`sp-row ${off ? 'off' : ''} ${wrongForm ? 'wrongform' : ''}`} onClick={() => toggle(a.id)}
-              tip={<div className="tooltip-body"><div className="tt-name">{a.name}</div><div>{a.desc}</div>{a.cost ? <div className="tt-dim">{costOf(h, a, d)} {d.res}</div> : null}{a.cd ? <div className="tt-dim">Cooldown {a.cd} s</div> : null}{a.aoe ? <div className="tt-dim">Obszarowe: trafia całą grupę</div> : null}{wrongForm ? <div className="tt-dim">Działa tylko w formie: {a.form}</div> : null}</div>}>
+            <Hover key={a.id} className={`sp-row ${off ? 'off' : ''} ${wrongForm ? 'wrongform' : ''}`} onClick={() => toggle(a.id)} tip={tipOf(a, wrongForm)}>
               <input type="checkbox" checked={!off} readOnly />
               <img src={abilityIcon(a, h.cls)} alt="" draggable={false} />
-              <div className="sp-main"><b>{a.name}</b>{a.talent && <span className="sp-tag">talent</span>}{a.kind === 'buff' || a.kind === 'proc' ? <span className="sp-tag pas">pasywna</span> : null}<div className="pdim">{a.desc}</div></div>
+              <div className="sp-main"><b>{a.name}</b>{a.talent && <span className="sp-tag">talent</span>}{a.kind === 'buff' || a.kind === 'proc' ? <span className="sp-tag pas">pasywna</span> : null}{a.cd ? <span className="sp-tag cd">{cdOf(a, d)} s</span> : null}<div className="pdim">{a.desc}</div></div>
             </Hover>
           )
         })}
@@ -345,7 +487,7 @@ export function TalentsPanel({ s, onClose, bump, toast }: { s: GameState; onClos
               <div className="tree-grid">
                 {Array.from({ length: 7 }, (_, tier) => (
                   <div key={tier} className={`tier ${spent >= tier * 5 ? '' : 'locked'}`}>
-                    {Array.from({ length: 3 }, (_, col) => {
+                    {Array.from({ length: TALENT_COLS }, (_, col) => {
                       const t = tl.find((x) => x.tier === tier && x.col === col)
                       if (!t) return <div key={col} className="tal empty" />
                       const rank = h.talents[t.id] ?? 0
@@ -353,8 +495,8 @@ export function TalentsPanel({ s, onClose, bump, toast }: { s: GameState; onClos
                       const ab = t.grants ? c.abilities.find((a) => a.id === t.grants) : undefined
                       const icon = ab ? abilityIcon(ab, h.cls) : talentIcon(t.fx[0]?.[0], tree)
                       return (
-                        <Hover key={col} className={`tal ${rank ? 'has' : ''} ${can ? 'can' : ''} ${rank >= t.max ? 'max' : ''}`} onClick={() => { if (learnTalent(s, t.id)) bump() }}
-                          tip={<div className="tooltip-body"><div className="tt-name">{t.name}</div><div className="tt-dim">Ranga {rank}/{t.max}{tier ? ` · wymaga ${tier * 5} pkt w ${name}` : ''}</div><div>{t.desc}</div>{ab && <div className="tt-dim">Daje umiejętność: {ab.name}</div>}{can && <div style={{ color: '#40ff40' }}>Kliknij, aby nauczyć</div>}</div>}>
+                        <Hover key={col} className={`tal ${rank ? 'has' : ''} ${can ? 'can' : ''} ${rank >= t.max ? 'max' : ''} ${t.forever ? 'forever' : ''}`} onClick={() => { if (learnTalent(s, t.id)) bump() }}
+                          tip={<div className="tooltip-body"><div className="tt-name">{t.name}</div><div className="tt-dim">Ranga {rank}/{t.max}{tier ? ` · wymaga ${tier * 5} pkt w ${name}` : ''}</div><div>{t.desc}</div>{t.forever && <div className="tt-forever">Nowe / zmienione w WoW Forever</div>}{ab && <div className="tt-dim">Daje umiejętność: {ab.name}</div>}{can && <div style={{ color: '#40ff40' }}>Kliknij, aby nauczyć</div>}</div>}>
                           <img src={icon} alt="" draggable={false} />
                           <span className="tal-rank">{rank}/{t.max}</span>
                         </Hover>

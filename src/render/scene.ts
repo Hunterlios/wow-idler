@@ -4,6 +4,7 @@ import { classById, type School } from '../data/classes'
 import { raceById } from '../data/races'
 import type { Biome, MobType } from '../data/zones'
 import { currentZone, activePet } from '../game/sim'
+import { styleOf } from '../game/formulas'
 import { zoneById } from '../data/zones'
 import { townOf } from '../game/world'
 import type { GameEvent, GameState } from '../game/types'
@@ -82,10 +83,11 @@ export class Scene {
   zoom = 0
   get px() { return this.zoom || Math.max(2, Math.round(this.h / 34)) }
 
-  mobTarget(s: GameState) {
-    const st = classById(s.hero.cls).style
-    return this.heroX + (st === 'melee' ? 44 : 120) * (this.px / 2)
+  // wróg zawsze dochodzi do zwarcia; dystansowcy strzelają, gdy jeszcze biegnie
+  mobTarget(_s: GameState) {
+    return this.heroX + 44 * (this.px / 2)
   }
+  totemVis: { id: string; el: string; x: number; life: number; gone: boolean }[] = []
 
   onEvent(e: GameEvent, s: GameState) {
     const hx = this.heroX
@@ -112,7 +114,7 @@ export class Scene {
         break
       case 'cast':
         if (e.kind === 'spell' || e.kind === 'dot') {
-          const st = classById(s.hero.cls).style
+          const st = styleOf(s.hero)
           if (e.school && e.school !== 'physical' || st === 'ranged') this.projs.push({ x: hx + 8, y: this.groundY - 14 * this.px, tx: mx, color: SCHOOL_COLOR[e.school ?? 'physical'], life: 1 })
         }
         this.castGlow = 0.4
@@ -227,8 +229,10 @@ export class Scene {
     if (s.mob) {
       this.lastMobState = { type: s.mob.type, color: s.mob.color, count: s.mob.count }
       const target = this.mobTarget(s)
-      if (this.mobX > target) this.mobX = Math.max(target, this.mobX - dt * 160)
-      if (this.mobX < target) this.mobX = target
+      const start = this.w + 30
+      const k = s.mob.dist0 > 0 ? Math.max(0, Math.min(1, s.mob.dist / s.mob.dist0)) : 0
+      const want = target + (start - target) * k
+      this.mobX = this.mobX > want ? Math.max(want, this.mobX - dt * 900) : want
       const bob = Math.sin(this.t * 3) * 0.5
       const boss = s.mob.boss
       const sc = boss === 'zone' ? 1.7 : boss === 'mini' ? 1.4 : 1
@@ -278,6 +282,9 @@ export class Scene {
       else if (pet.tank) this.voidwalker(px, gy)
       else this.imp(px - 4, gy)
     }
+
+    // totemy szamana: stoją tam, gdzie je postawiono; gdy postać odchodzi, zostają w tyle i znikają
+    this.totems(s, gy, moving, dt)
 
     // bohater
     this.hero(s, gy, moving, dt)
@@ -334,6 +341,39 @@ export class Scene {
     // napisy stanu
     if (s.phase === 'travel') this.text(`→ ${s.trip?.label || zone.name}`, w / 2, 16, '#ffd100', 13, true)
     if (s.phase === 'dead') this.text(`Duch wraca do zwłok... ${Math.ceil(s.phaseT)} s`, w / 2, 16, '#c0d8ff', 12, true)
+  }
+
+  totems(s: GameState, gy: number, moving: boolean, dt: number) {
+    const c = this.ctx
+    const p = this.px / 2
+    const live = s.hero.totems ?? []
+    const ORDER = ['earth', 'fire', 'water', 'air']
+    for (const t of live) {
+      const v = this.totemVis.find((x) => x.id === t.id && !x.gone)
+      if (!v) this.totemVis.push({ id: t.id, el: t.el, x: this.heroX - (16 + ORDER.indexOf(t.el) * 9) * p, life: 1, gone: false })
+    }
+    for (const v of this.totemVis) {
+      if (!v.gone && !live.some((t) => t.id === v.id)) v.gone = true
+      if (v.gone) { v.life -= dt * 0.6; if (moving) v.x -= dt * 42 }
+    }
+    this.totemVis = this.totemVis.filter((v) => v.life > 0 && v.x > -20)
+    const COL: Record<string, [string, string]> = { earth: ['#8a6a3a', '#c8a060'], fire: ['#a03a1a', '#ff8a30'], water: ['#2a5a9a', '#7ac8ff'], air: ['#9aa8b8', '#ffffff'] }
+    for (const v of this.totemVis) {
+      const [base, glow] = COL[v.el] ?? COL.earth
+      const x = Math.round(v.x)
+      c.globalAlpha = Math.max(0, Math.min(1, v.life))
+      this.shadow(x + 2 * p, gy, 5 * p)
+      c.fillStyle = '#2a1a0a'; c.fillRect(x - p, gy - 15 * p, 6 * p, 15 * p)
+      c.fillStyle = base; c.fillRect(x, gy - 14 * p, 4 * p, 14 * p)
+      c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(x + p, gy - 11 * p, p, p); c.fillRect(x + 2.5 * p, gy - 11 * p, p, p); c.fillRect(x + p, gy - 8 * p, 2.5 * p, p * 0.8)
+      c.fillStyle = '#e8d8b0'; c.fillRect(x - 2 * p, gy - 6 * p, 8 * p, p)
+      if (!v.gone) {
+        c.shadowColor = glow; c.shadowBlur = 8
+        c.fillStyle = glow; c.fillRect(x + p, gy - (16 + Math.sin(this.t * 4 + x) ) * p, 2 * p, 2 * p)
+        c.shadowBlur = 0
+      }
+      c.globalAlpha = 1
+    }
   }
 
   // Rejs statkiem albo lot zeppelinem

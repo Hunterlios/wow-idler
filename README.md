@@ -1,4 +1,4 @@
-# Azeroth Idle (demo 0.3)
+# Azeroth Idle (demo 0.4)
 
 Idle RPG w klimacie WoW Classic. Siedzi jako pasek nad paskiem zadań Windows i gra się sam: bohater chodzi po strefach, walczy, zbiera łup, robi zadania, awansuje i wędruje dalej trasą levelowania swojej frakcji. Gra liczy się też wtedy, gdy jest zamknięta.
 
@@ -38,6 +38,19 @@ npm run balance    # symulacja 24 h gry (gracz zagląda do miasta co godzinę) d
 - **Przedmioty:** porównanie z założonym w tooltipie (z różnicą statystyk), ręczna zmiana przez slot w oknie postaci, wyłączenie automatycznego zakładania, zdejmowanie i sprzedaż toreb.
 - **Okna i pasek** można przeciągać (pasek za uchwyt ⠿, okna za tytuł). UI skaluje się bez pasków przewijania, a skalę i szerokość paska ustawisz w ustawieniach.
 
+### Nowe w 0.4
+- **Przeciąganie przedmiotów (drag & drop):** między torbami, do i z okna postaci, na pasek toreb (wkłada do danej torby), do kupca (sprzedaż). Torbę zdejmujesz, przeciągając ją z paska na wolne miejsce w innej torbie. Prawy przycisk zakłada przedmiot, zdejmuje go z okna postaci, zjada jedzenie z buffem, a u kupca sprzedaje.
+- **Kupiec:** odkup 10 ostatnio sprzedanych przedmiotów, jedzenie i picie (nazwy z Classica), jedzenie z buffem (Well Fed, jeden naraz, 15 min). **Sortowanie toreb** przyciskiem w plecaku.
+- **Odpoczynek wymaga jedzenia i picia** z toreb. Bez nich regeneracja jest dużo wolniejsza. Humanoidy czasem upuszczają jedzenie.
+- **Zwarcie:** wróg najpierw podchodzi. Walczący wręcz biją dopiero w zwarciu (Charge i Feral Charge skracają dystans), a dystansowcy strzelają, zanim dojdzie.
+- **Weapon Master** w stolicy uczy typów broni dozwolonych dla klasy (jak w Classicu, np. szaman: sztylety, pięściarze, topory i buławy 1H/2H, kije). Łupy to także broń innych typów (możesz jej nie umieć używać).
+- **Umiejętności z WoW Forever + Classica** (zwykle 25–30 na klasę), m.in. Holy Strike, Seal of Fury, Summon Hawk, Lava Burst, Fire Nova (czar z cooldownem), Call of the Elements, Totemic Projection, Arcane Blast, Drain Hope, Mutilate, Venom, Penance, Prayer of Mending, Berserk. Przejrzane cooldowny (leczenia mają cooldown w idlerze, np. Healing Wave 10 s).
+- **Grupy wyboru** w księdze (P): jedno nasycenie broni szamana, jedna pieczęć/aura/błogosławieństwo paladyna, aspekt łowcy, pancerz maga/warlocka, klątwa, tarcza żywiołu, po jednym totemie na żywioł.
+- **Totemy widać na scenie.** Działają tylko przy postaci: po przejściu do kolejnego wroga zostają w tyle i znikają razem z buffem (chyba że Totemic Projection je przeniesie).
+- **Pełniejsze drzewka talentów** (4 kolumny, 14–20 talentów na drzewko) według WoW Forever. Szamański Elemental jest odwzorowany 1:1 z bety, a w pozostałych drzewach nowe i zmienione talenty Forever (niebieska kropka) wstawiono w układ z 1.12. Przy aktualizacji punkty talentów wracają do rozdania.
+- **Okno postaci:** tooltip przy każdym atrybucie (co daje, ile redukcji obrażeń daje pancerz na twoim poziomie i +3).
+- **Zadania „zbierz”** to prawdziwe przedmioty w torbach. Po porzuceniu i ponownym wzięciu zadania zebrane już przedmioty się liczą.
+
 Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classica, bez plików Blizzarda.
 
 ## Struktura
@@ -46,7 +59,7 @@ Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classi
 src/data/      rasy, klasy+umiejętności, strefy+trasy, podstrefy+bossowie  <- zawartość gry
 src/game/      czysta logika (bez DOM): sim.ts, world.ts, quests.ts, town.ts, inventory.ts, items.ts, save.ts
 src/render/    scene.ts (scena + miasta), icons.ts (ikony przedmiotów i umiejętności)
-src/ui/        React: tworzenie postaci, pasek, panele, mapa
+src/ui/        React: tworzenie postaci, pasek, panele, mapa, dnd.tsx (przeciąganie), itemActions.ts
 electron/      main.cjs (okno-nakładka, tray, autostart), preload.cjs
 scripts/       balance.ts
 ```

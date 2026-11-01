@@ -7,6 +7,8 @@ import { RARITY_COLOR } from '../game/types'
 import type { Scene } from '../render/scene'
 import { CharacterCreate } from './CharacterCreate'
 import { Strip, type PanelId } from './Strip'
+import { DragGhost, setDropHandler } from './dnd'
+import { dropItem } from './itemActions'
 import { BagsPanel, CharacterPanel, CityPanel, LogPanel, QuestLog, Settings, Spellbook, TalentsPanel, fmtTime } from './Panels'
 import { onLayout, uiScale } from './layout'
 import { MapPanel } from './MapPanel'
@@ -118,11 +120,12 @@ export function App() {
 
   const act = (a: 'town' | 'capital' | 'leave') => {
     if (a === 'town') { if (!enterTown(game)) toast('Ta mapa nie ma miasta.', '#ff4040') }
-    else if (a === 'capital') enterCapital(game)
+    else if (a === 'capital') { enterCapital(game); setOpen((o) => new Set([...o, 'bags'])) }
     else if (a === 'leave') leaveTown(game)
     bump()
   }
   const ax = { bump, toast }
+  setDropHandler((src, target) => { const r = dropItem(game, src, target); if (r) toast(r.msg, r.color); bump() })
 
   return (
     <div className={`root ${isOverlay ? 'overlay' : 'web'}`}>
@@ -145,6 +148,7 @@ export function App() {
       {offline && <OfflineModal sum={offline} s={game} onClose={() => setOffline(null)} />}
       <div className="toasts">{toasts.map((t) => <div key={t.id} className="toast" style={{ color: t.color }}>{t.text}</div>)}</div>
       <Strip s={game} sceneRef={sceneRef} open={open} toggle={toggle} act={act} />
+      <DragGhost />
     </div>
   )
 }
@@ -179,7 +183,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — wersja przeglądarkowa (demo 0.3)</b>
+        <b>Azeroth Idle — wersja przeglądarkowa (demo 0.4)</b>
         <span>W aplikacji (Electron) tło jest przezroczyste, a pasek siedzi nad paskiem zadań Windows.</span>
         <span>Skróty: C postać · B torby · L zadania · P umiejętności · N talenty · M mapa · Esc zamyka okna</span>
       </div>

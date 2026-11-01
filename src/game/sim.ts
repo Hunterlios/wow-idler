@@ -1,12 +1,13 @@
 // Rdzeń gry: czysta funkcja kroku symulacji (bez DOM). Ten sam kod liczy grę na żywo,
 // progres offline i testy balansu.
-import { classById, type Ability, type Cond, type PetDef } from '../data/classes'
+import { classById, isMelee, startSkills, type Ability, type Cond, type PetDef } from '../data/classes'
 import { raceById, type RaceId } from '../data/races'
 import type { ClassId } from '../data/classes'
 import { zoneById, ROUTES } from '../data/zones'
-import { basePower, derive, dmgMult, grants, knows, formOk, mobStats, mobXp, rageConv, resourceOf, styleOf, xpToNext, MAX_LEVEL, type Derived } from './formulas'
-import { makeGear, makeJunk, makeBag, starterGear } from './items'
-import { addToInv, autoEquip, fixInv } from './inventory'
+import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, mobXp, rageConv, resourceOf, styleOf, xpToNext, MAX_LEVEL, type Derived } from './formulas'
+import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOODS } from './items'
+import { addToInv, autoEquip, fixInv, countItems } from './inventory'
+import { syncQuests } from './quests'
 import { makeRng, type Rng } from './rng'
 import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip } from './world'
 import type { GameEvent, GameState, Hero, Item, MobState, OfflineSummary } from './types'
@@ -25,18 +26,22 @@ export function newGame(name: string, race: RaceId, cls: ClassId, seed = (Date.n
   const hero: Hero = {
     name, race, cls, faction: r.faction, level: 1, xp: 0, rested: 0, hp: 1, res: 0, cp: 0, copper: 0,
     equip: {}, bags: [null, null, null, null], inv: [], trained: {}, talents: {}, disabled: {}, form: 'caster', pet: 'imp', temp: {},
+    choice: {}, totems: [], weaponSkills: startSkills(classById(cls)), eating: null, wellFed: null, stacks: {}, heroDodged: false,
     cds: {}, buffs: {}, casting: null, hot: null, shield: 0, gcd: 0, swing: 0, sinceCast: 99, petSwing: 0,
   }
   for (const it of starterGear(hero)) hero.equip[it.slot === 'twohand' ? 'mainhand' : (it.slot as keyof Hero['equip'])] = it
   for (const a of classById(cls).abilities) if (a.lvl === 1 && !a.talent) hero.trained[a.id] = 1
   fixInv(hero)
+  // na start trochę jedzenia i picia, jak w Classicu
+  addToInv(hero, makeFood(7, FOODS[0], 8))
+  if (classById(cls).resource === 'mana') addToInv(hero, makeFood(8, FOODS[6], 8))
   const d = derive(hero)
   hero.hp = d.maxHp
   hero.res = d.res === 'rage' ? 0 : d.maxRes
   const start = r.start.zone
   const s: GameState = {
-    v: 3, seed, itemSeq: 10, hero, start, loc: { zone: start, sub: 0 }, where: 'field', prog: { [start]: { cleared: 0, kills: 0 } },
-    unlocked: [start], autoAdvance: true, autoEquip: true, trip: null, phase: 'walk', phaseT: 2, mob: null, quests: [], questsDone: [],
+    v: 4, seed, itemSeq: 10, hero, start, loc: { zone: start, sub: 0 }, where: 'field', prog: { [start]: { cleared: 0, kills: 0 } },
+    unlocked: [start], autoAdvance: true, autoEquip: true, trip: null, phase: 'walk', phaseT: 2, mob: null, quests: [], questsDone: [], buyback: [],
     totals: { kills: 0, deaths: 0, copper: 0, xp: 0, items: 0, quests: 0, played: 0, bosses: 0 }, log: [], savedAt: Date.now(), speed: 1,
   }
   const parent = zoneById(start).parent
@@ -64,7 +69,7 @@ export function learnableCount(h: Hero) {
 const dcache = new WeakMap<Hero, { key: string; d: Derived }>()
 export function stats(h: Hero): Derived {
   const temps = Object.entries(h.temp ?? {}).filter(([, v]) => v > 0).map(([k]) => k).join(',')
-  const key = `${h.level}|${Object.values(h.equip).map((i) => i?.id).join(',')}|${(h.buffs.bloodfury ?? 0) > 0}|${(h.buffs.stoneform ?? 0) > 0}|${(h.buffs.berserking ?? 0) > 0}|${Object.values(h.trained).join(',')}|${JSON.stringify(h.talents)}|${JSON.stringify(h.disabled)}|${h.form}|${temps}`
+  const key = `${h.level}|${Object.values(h.equip).map((i) => i?.id).join(',')}|${(h.buffs.bloodfury ?? 0) > 0}|${(h.buffs.stoneform ?? 0) > 0}|${(h.buffs.berserking ?? 0) > 0}|${Object.values(h.trained).join(',')}|${JSON.stringify(h.talents)}|${JSON.stringify(h.disabled)}|${h.form}|${temps}|${(h.totems ?? []).map((t) => t.id).join('.')}|${h.wellFed && h.wellFed.left > 0 ? h.wellFed.name : ''}|${JSON.stringify(h.choice)}`
   const c = dcache.get(h)
   if (c && c.key === key) return c.d
   const d = derive(h)
@@ -78,6 +83,7 @@ export function activePet(h: Hero): PetDef | null {
   if (!pets) return null
   const d = stats(h)
   if ((d.m.noPet ?? 0) > 0) return null
+  if (h.cls === 'hunter' && h.disabled.pet) return null
   if (h.cls === 'warlock') {
     const want = pets.find((p) => p.id === h.pet && h.level >= p.lvl && (h.trained[`summon_${p.id}`] ?? 0) > 0)
     return want ?? pets.find((p) => p.id === 'imp') ?? null
@@ -104,6 +110,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
   for (const k in h.cds) if (h.cds[k] > 0) h.cds[k] -= dt
   for (const k in h.buffs) if (h.buffs[k] > 0) h.buffs[k] -= dt
   for (const k in h.temp) if (h.temp[k] > 0) h.temp[k] -= dt
+  if (h.wellFed) { h.wellFed.left -= dt; if (h.wellFed.left <= 0) { h.wellFed = null; log(s, 'Well Fed minął.', '#aaaaaa') } }
   h.sinceCast += dt
   h.gcd = Math.max(0, h.gcd - dt)
 
@@ -111,6 +118,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
     s.phase = 'town'
     h.hp = d.maxHp
     if (d.res === 'mana') h.res = d.maxRes
+    h.totems = []
     return
   }
   if (s.phase === 'town') { s.phase = 'walk'; s.phaseT = 1.5 }
@@ -129,9 +137,12 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
     if (h.hot.tickIn <= 0) { heal(h, d, h.hot.perTick, emit, 'HoT'); h.hot.tickIn += 3 }
     if (h.hot.left <= 0) h.hot = null
   }
+  totemTick(s, d, dt, emit)
 
   switch (s.phase) {
     case 'walk':
+      // odejście od totemów: znikają razem z buffem (chyba że Totemic Projection je przeniesie)
+      if (h.totems.length) leaveTotems(s, d, emit)
       regenOut(h, d, dt, 0.008)
       s.phaseT -= dt
       if (s.phaseT <= 0) spawn(s, rng, emit)
@@ -141,23 +152,30 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
       fight(s, d, dt, rng, emit)
       break
     case 'rest': {
-      const k = 0.06 * (1 + (raceById(h.race).mods.regenPct ?? 0))
-      h.hp = Math.min(d.maxHp, h.hp + d.maxHp * k * dt)
-      if (d.res === 'mana') h.res = Math.min(d.maxRes, h.res + d.maxRes * 0.06 * dt)
+      // bez jedzenia i picia odpoczynek trwa dużo dłużej
+      const race = 1 + (raceById(h.race).mods.regenPct ?? 0)
+      const e = h.eating
+      const eat = e && e.left > 0
+      h.hp = Math.min(d.maxHp, h.hp + (d.maxHp * 0.018 * race + (eat ? e!.hp : 0)) * dt)
+      if (d.res === 'mana') h.res = Math.min(d.maxRes, h.res + (d.maxRes * 0.02 + (eat ? e!.mana : 0)) * dt)
+      if (e) e.left -= dt
       const full = h.hp >= d.maxHp * 0.98 && (d.res !== 'mana' || h.res >= d.maxRes * 0.98)
-      if (full) { s.phase = 'walk'; s.phaseT = 1 + rng.next() * 2 }
+      if (full) { s.phase = 'walk'; s.phaseT = 1 + rng.next() * 2; h.eating = null }
       break
     }
     case 'dead':
+      h.totems = []
       s.phaseT -= dt
       if (s.phaseT <= 0) {
         h.hp = d.maxHp * 0.5
         if (d.res === 'mana') h.res = d.maxRes * 0.5
         s.phase = 'rest'
+        startRest(s, d)
         emit({ t: 'revive' })
       }
       break
     case 'travel':
+      h.totems = []
       regenOut(h, d, dt, 0.05)
       s.phaseT -= dt
       if (s.phaseT <= 0) { s.phase = 'walk'; s.phaseT = 1; s.trip = null }
@@ -167,6 +185,105 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
 
 function regenOut(h: Hero, d: Derived, dt: number, pct: number) {
   h.hp = Math.min(d.maxHp, h.hp + d.maxHp * pct * dt * (1 + (raceById(h.race).mods.regenPct ?? 0)))
+}
+
+// ------------------------------------------------------------------ jedzenie i picie
+let lastFoodWarn = -1e9
+export function bestFood(h: Hero, kind: 'food' | 'drink') {
+  let best = -1
+  h.inv.forEach((it, i) => { if (it?.food?.kind === kind && it.food.lvl <= h.level && (best < 0 || it.food.lvl > h.inv[best]!.food!.lvl)) best = i })
+  return best
+}
+function consume(h: Hero, idx: number) {
+  const it = h.inv[idx]!
+  if ((it.count ?? 1) > 1) it.count = (it.count ?? 1) - 1
+  else h.inv[idx] = null
+  return it
+}
+function startRest(s: GameState, d: Derived) {
+  const h = s.hero
+  const needHp = h.hp < d.maxHp * 0.9
+  const needMana = d.res === 'mana' && h.res < d.maxRes * 0.9
+  h.eating = { hp: 0, mana: 0, left: 15 }
+  let missing = false
+  if (needHp) {
+    const i = bestFood(h, 'food')
+    if (i >= 0) h.eating.hp = Math.max(consume(h, i).food!.amt * 1.3, d.maxHp * 0.3) / 15
+    else if (raceById(h.race).active === 'cannibalize' && !(h.cds.cannibalize > 0)) { h.eating.hp = (d.maxHp * 0.35) / 10; h.cds.cannibalize = 120 }
+    else missing = true
+  }
+  if (needMana) {
+    const i = bestFood(h, 'drink')
+    if (i >= 0) h.eating.mana = Math.max(consume(h, i).food!.amt * 1.1, d.maxRes * 0.3) / 15
+    else missing = true
+  }
+  if (missing && s.totals.played - lastFoodWarn > 300) {
+    lastFoodWarn = s.totals.played
+    log(s, `Brak ${needHp && needMana ? 'jedzenia i picia' : needHp ? 'jedzenia' : 'picia'} w torbach: odpoczynek trwa dłużej. Kupisz je u kupca w stolicy.`, '#ff9040')
+  }
+}
+// Jedzenie z buffem (klik w torbie): jeden Well Fed naraz
+export function useItem(s: GameState, idx: number): string | null {
+  const h = s.hero
+  const it = h.inv[idx]
+  if (!it?.food) return null
+  if (it.food.lvl > h.level) return `Wymaga poziomu ${it.food.lvl}.`
+  if (it.food.kind !== 'buff') return 'Postać sama je i pije podczas odpoczynku.'
+  if (s.phase === 'fight') return 'Nie możesz jeść w walce.'
+  consume(h, idx)
+  h.wellFed = { name: it.name, fx: it.food.buff!.fx, left: WELL_FED }
+  log(s, `${it.name}: Well Fed (${it.food.buff!.text}, 15 min).`, '#40ff40')
+  return null
+}
+const WELL_FED = 15 * 60
+
+// ------------------------------------------------------------------ totemy
+function totemTick(s: GameState, d: Derived, dt: number, emit: Emit) {
+  const h = s.hero
+  if (!h.totems.length) return
+  const abs = classById(h.cls).abilities
+  for (const t of h.totems) {
+    t.left -= dt
+    const a = abs.find((x) => x.id === t.id)
+    if (!a?.tick) continue
+    t.tickIn -= dt
+    if (t.tickIn > 0) continue
+    t.tickIn += a.tick.every
+    const bp = basePower(Math.min(h.level, h.trained[a.id] ?? h.level))
+    if (a.tick.power && s.phase === 'fight' && s.mob && s.mob.dist <= 0) {
+      const n = a.aoe ? Math.min(3, aliveOf(s.mob)) : 1
+      hitMob(s, d, bp * a.tick.power * d.spellMult * dmgMult(d, a, false) * n, false, emit, a.school ?? 'fire', a.name)
+    }
+    if (a.tick.heal) heal(h, d, bp * a.tick.heal * d.spellMult * (1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)), emit, a.name)
+    if (a.tick.mana && d.res === 'mana') h.res = Math.min(d.maxRes, h.res + d.maxRes * a.tick.mana * (1 + (d.m[`ab:${a.id}`] ?? 0)))
+  }
+  h.totems = h.totems.filter((t) => t.left > 0)
+}
+function leaveTotems(s: GameState, d: Derived, emit: Emit) {
+  const h = s.hero
+  const proj = classById(h.cls).abilities.find((a) => a.id === 'totemic_projection')
+  if (proj && knows(h, proj) && !h.disabled[proj.id] && !(h.cds[proj.id] > 0) && d.res === 'mana' && h.res > d.maxRes * 0.25) {
+    h.res -= d.maxRes * 0.1
+    h.cds[proj.id] = 60
+    emit({ t: 'totem', name: 'Totemic Projection' })
+    return
+  }
+  h.totems = []
+}
+function placeTotem(h: Hero, a: Ability) {
+  h.totems = h.totems.filter((t) => t.el !== a.totem)
+  h.totems.push({ id: a.id, el: a.totem!, left: 300, tickIn: a.tick ? 0.5 : 0 })
+}
+// wybrane totemy, których jeszcze nie ma
+function missingTotems(h: Hero, g = grants(h)) {
+  const out: Ability[] = []
+  for (const el of ['earth', 'fire', 'water', 'air']) {
+    if (h.totems.some((t) => t.el === el)) continue
+    const id = chosenIn(h, `totem:${el}`, g)
+    const a = id ? classById(h.cls).abilities.find((x) => x.id === id) : undefined
+    if (a && !h.disabled[a.id]) out.push(a)
+  }
+  return out
 }
 
 // ------------------------------------------------------------------ bossowie i moby
@@ -189,12 +306,14 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
   const style = styleOf(h)
   const b = bossState(s)
   const r = raceById(h.race)
+  // wróg podchodzi: walczący wręcz biegną sobie naprzeciw (krótko), dystansowcy strzelają, zanim dojdzie
+  const dist = style === 'melee' ? 1.1 : 2.4
   if (b.frontier && b.full) {
     const look = bossLook(zoneId, sub)
     const zoneBoss = subOf(s).zoneBoss
     const ms = mobStats(b.lvl)
     const hp = Math.round(ms.hp * (zoneBoss ? 3.6 : 2.4))
-    s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: style === 'melee' ? 1.2 : 2.6, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini' }
+    s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini', dist, dist0: dist, cc: 0 }
     emit({ t: 'spawn', mob: look.name, lvl: b.lvl, boss: s.mob.boss })
     log(s, `${zoneBoss ? 'BOSS' : 'Miniboss'}: ${look.name} (${b.lvl}) wychodzi do walki!`, '#ff8040')
   } else {
@@ -206,12 +325,13 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
     const count = h.level < 4 ? 1 : h.level < 8 ? (roll < 0.75 ? 1 : 2) : roll < 0.5 ? 1 : roll < 0.83 ? 2 : 3
     const each = count === 1 ? 1 : count === 2 ? 0.8 : 0.7 // w grupach moby są nieco słabsze
     const per = Math.round(ms.hp * (0.92 + rng.next() * 0.16) * each)
-    s.mob = { name, type, color, lvl, hp: per * count, maxHp: per * count, per, dmg: ms.dmg * each, speed: ms.speed, swing: style === 'melee' ? 1.2 : 2.6, dots: [], stun: 0, dodged: false, count }
+    s.mob = { name, type, color, lvl, hp: per * count, maxHp: per * count, per, dmg: ms.dmg * each, speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count, dist, dist0: dist, cc: 0 }
     emit({ t: 'spawn', mob: name, lvl })
   }
   s.phase = 'fight'
-  h.swing = style === 'melee' ? 0.4 : 0
+  h.swing = style === 'melee' ? 0.3 : 0
   h.cp = 0
+  h.heroDodged = false
   h.sinceCast = Math.min(h.sinceCast, 99)
   fightT = 0
   const ready = (k: string) => !(h.cds[k] > 0)
@@ -222,18 +342,26 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
 
 let fightT = 0
 const BEASTS = new Set(['beast', 'cat', 'boar', 'raptor'])
+const missChance = (d: Derived, up: number, spell: boolean) => Math.max(0, (spell ? 0.04 + up * 0.03 : 0.05 + up * 0.02) - (d.m.hit ?? 0))
 
 function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   const h = s.hero
   const mob = s.mob!
   const haste = d.haste
   fightT += dt
+  if (mob.dist > 0) mob.dist = Math.max(0, mob.dist - dt)
+  if (mob.cc > 0) mob.cc -= dt
+  const inMelee = mob.dist <= 0
 
   // DoT-y na mobach
   for (const dot of mob.dots) {
     dot.left -= dt
     dot.tickIn -= dt
-    if (dot.tickIn <= 0) { hitMob(s, d, dot.perTick, false, emit, dot.school, dot.name); dot.tickIn += 3 }
+    if (dot.tickIn <= 0) {
+      const crit = (d.m.dotCrit ?? 0) > 0 && rng.chance(d.spellCrit)
+      hitMob(s, d, dot.perTick * (crit ? 1.5 + (d.m.critDmg ?? 0) / 2 : 1), crit, emit, dot.school, dot.name)
+      dot.tickIn += 3
+    }
   }
   mob.dots = mob.dots.filter((x) => x.left > 0)
   if (mob.hp <= 0) return onKill(s, rng, emit)
@@ -261,10 +389,11 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   }
   if (!s.mob) return
 
-  // białe ataki: melee/łowca; caster tylko bez many albo gdy nie ma czego rzucać
+  // białe ataki: melee (tylko w zwarciu) / łowca (strzela od razu); caster tylko bez many albo gdy nie ma czego rzucać
   const style = styleOf(h)
   const lowMana = d.res === 'mana' && h.res < d.maxRes * 0.12
-  if ((style !== 'caster' || lowMana || lastNoAction) && !h.casting) {
+  const reach = style === 'ranged' || s.mob.dist <= 0
+  if ((style !== 'caster' || lowMana || lastNoAction) && !h.casting && reach) {
     h.swing -= dt * haste
     if (h.swing <= 0) {
       h.swing += d.weaponSpeed
@@ -285,23 +414,25 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
     }
   }
 
-  // ataki mobów (grupa bije razem)
-  if (!s.mob) return
+  // ataki mobów (grupa bije razem) — dopiero gdy dojdą do postaci
+  if (!s.mob || !inMelee) { if (h.hp <= 0) onDeath(s, emit); return }
   if (mob.stun > 0) mob.stun -= dt
   else {
     mob.swing -= dt
     if (mob.swing <= 0) {
       mob.swing += mob.speed
       const alive = aliveOf(mob)
+      const attackers = Math.max(alive > 1 && mob.cc > 0 ? alive - 1 : alive, 1)
       if (pet?.tank && rng.chance(0.7)) {
         // pupil przyjmuje cios
-      } else {
+      } else if ((d.m.immune ?? 0) > 0) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'absorb' })
+      else {
         const roll = rng.next()
         if (roll < 0.05) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'miss' })
-        else if (roll < 0.05 + Math.min(0.75, d.dodge)) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'dodge' })
+        else if (roll < 0.05 + Math.min(0.75, d.dodge)) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'dodge' }); h.heroDodged = true }
         else {
           const up = Math.max(0, mob.lvl - h.level)
-          let dmg = mob.dmg * alive * (alive > 1 ? 0.75 : 1) * (1 + 0.12 * up + 0.02 * up * up) * (0.85 + rng.next() * 0.3) * (1 - d.dr(mob.lvl))
+          let dmg = mob.dmg * attackers * (attackers > 1 ? 0.75 : 1) * (1 + 0.12 * up + 0.02 * up * up) * (0.85 + rng.next() * 0.3) * (1 - d.dr(mob.lvl))
           if (rng.chance(0.05)) dmg *= 1.5
           if (h.shield > 0) {
             const ab = Math.min(h.shield, dmg)
@@ -317,6 +448,10 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
           procs(s, d, rng, emit, 'taken')
           if (s.mob && s.mob.hp <= 0) return onKill(s, rng, emit)
         }
+        if ((d.m.retal ?? 0) > 0 && s.mob) {
+          hitMob(s, d, whiteHit(d, rng) * d.m.retal, false, emit, 'physical', 'Retaliation')
+          if (s.mob.hp <= 0) return onKill(s, rng, emit)
+        }
         const r = raceById(h.race)
         if (r.active === 'stoneform' && h.hp < d.maxHp * 0.4 && !(h.cds.stoneform > 0)) { h.buffs.stoneform = 8; h.cds.stoneform = 180; emit({ t: 'racial', name: 'Stoneform' }) }
       }
@@ -326,19 +461,27 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
 }
 let lastNoAction = false
 
+const sweepMul = (s: GameState, d: Derived) => ((d.m.sweep ?? 0) > 0 && s.mob && aliveOf(s.mob) >= 2 ? 1.5 : 1)
+
 function whiteSwing(s: GameState, d: Derived, rng: Rng, emit: Emit, mult: number) {
   const h = s.hero
   const mob = s.mob!
   const roll = rng.next()
-  const miss = 0.05 + Math.max(0, mob.lvl - h.level) * 0.02
+  const miss = missChance(d, Math.max(0, mob.lvl - h.level), false)
   if (roll < miss) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss' }); return }
   if (roll < miss + 0.05) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'dodge' }); mob.dodged = true; return }
   const crit = rng.chance(d.crit)
-  let dmg = whiteHit(d, rng) * (crit ? 2 + (d.m.critDmg ?? 0) : 1) * mult * dmgMult(d, null, true)
+  let dmg = whiteHit(d, rng) * (crit ? 2 + (d.m.critDmg ?? 0) : 1) * mult * dmgMult(d, null, true) * sweepMul(s, d)
   if (h.race === 'troll' && BEASTS.has(mob.type)) dmg *= 1.05
   hitMob(s, d, dmg, crit, emit, 'physical')
   if (d.res === 'rage') h.res = Math.min(100, h.res + ((7.5 * dmg) / rageConv(h.level) / (crit ? 2 : 1)) * (1 + (d.m.resGen ?? 0)))
+  maelstrom(h, d, rng)
   procs(s, d, rng, emit, 'hit')
+}
+// Maelstrom Weapon (Forever): ciosy wręcz ładują do 5 ładunków
+function maelstrom(h: Hero, d: Derived, rng: Rng) {
+  const mw = d.m.mw ?? 0
+  if (mw > 0 && styleOf(h) === 'melee' && rng.chance(mw * 0.06)) h.stacks.mw = Math.min(5, (h.stacks.mw ?? 0) + 1)
 }
 
 // Procki: trucizny, pieczęcie, nasycenia broni (on: hit) i tarcze/aury (on: taken)
@@ -347,11 +490,13 @@ function procs(s: GameState, d: Derived, rng: Rng, emit: Emit, on: 'hit' | 'take
   if (!s.mob) return
   const g = grants(h)
   for (const a of classById(h.cls).abilities) {
-    if (a.kind !== 'proc' || !a.proc || a.proc.on !== on || h.disabled[a.id] || !knows(h, a, g) || !formOk(h, a)) continue
+    if (a.kind !== 'proc' || !a.proc || a.proc.on !== on || !active(h, a, g)) continue
     if (!rng.chance(a.proc.chance)) continue
     if (a.proc.extra) { whiteSwingNoProc(s, d, rng, emit); continue }
     const bp = basePower(Math.min(h.level, h.trained[a.id] ?? h.level))
-    hitMob(s, d, bp * a.proc.power * d.spellMult * dmgMult(d, a, false), false, emit, a.school ?? 'physical', a.name)
+    if (a.proc.heal) heal(h, d, bp * a.proc.heal * d.spellMult, emit, a.name)
+    if (a.proc.mana && d.res === 'mana') h.res = Math.min(d.maxRes, h.res + d.maxRes * a.proc.mana)
+    if (a.proc.power > 0) hitMob(s, d, bp * a.proc.power * d.spellMult * dmgMult(d, a, false), false, emit, a.school ?? 'physical', a.name)
     if (!s.mob || s.mob.hp <= 0) return
   }
 }
@@ -388,14 +533,18 @@ function heal(h: Hero, d: Derived, amt: number, emit: Emit, ability?: string) {
 export const costOf = (h: Hero, a: Ability, d: Derived) => {
   if (!a.cost) return 0
   const tempCost = d.m.cost ?? 0 // talenty (+) i Arcane Power (-) w jednym kluczu
-  const mul = Math.max(0, 1 - tempCost)
+  let mul = Math.max(0, 1 - tempCost)
+  if (a.id === 'lightning_bolt') mul *= 1 - 0.2 * (h.stacks?.mw ?? 0)
+  if (a.id === 'arcane_blast') mul *= 1 + 0.5 * (h.stacks?.ab ?? 0)
+  if (a.kind === 'totem' && a.id !== 'call_elements') mul *= 1
   return d.res === 'mana' ? Math.round((a.cost / 100) * d.maxRes * 0.22 * mul) : Math.round(a.cost * (tempCost < 0 ? 0 : 1))
 }
+export const cdOf = (a: Ability, d: Derived) => (a.cd ? Math.max(0.5, a.cd - (d.m[`cd:${a.id}`] ?? 0)) : 0)
 function castTime(h: Hero, d: Derived, a: Ability) {
   if (!a.cast) return 0
   if ((d.m.instant ?? 0) > 0) return 0
-  const red = (d.m[`cast:${a.id}`] ?? 0) + (d.m[`cast:${a.school}`] ?? 0) + (d.m['cast:all'] ?? 0)
-  return Math.max(0, a.cast * (1 - Math.min(0.6, red)))
+  const red = (d.m[`cast:${a.id}`] ?? 0) + (d.m[`cast:${a.school}`] ?? 0) + (d.m['cast:all'] ?? 0) + (a.id === 'lightning_bolt' ? 0.2 * (h.stacks.mw ?? 0) : 0)
+  return Math.max(0, a.cast * (1 - Math.min(1, red)))
 }
 function clearInstant(h: Hero) {
   for (const a of classById(h.cls).abilities) if (a.buff?.instant && h.temp[a.id] > 0) h.temp[a.id] = 0
@@ -409,22 +558,26 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
   const mana = d.res === 'mana' ? h.res / d.maxRes : 1
   switch (c) {
     case 'hp<20': return hp < 0.2
+    case 'hp<25': return hp < 0.25
     case 'hp<35': return hp < 0.35
+    case 'hp<40': return hp < 0.4
     case 'hp<45': return hp < 0.45
     case 'hp<50': return hp < 0.5
     case 'hp<60': return hp < 0.6
     case 'hp<75': return hp < 0.75
     case 'hp>60': return hp > 0.6
     case 'mob<20': return mobPct < 0.2
+    case 'mob<25': return mobPct < 0.25
     case 'mob>30': return mobPct > 0.3
     case 'mob>50': return mobPct > 0.5
     case 'noDot': return !mob.dots.some((x) => x.id === a.id)
     case 'dodged': return mob.dodged
+    case 'heroDodged': return h.heroDodged
     case 'cp>=2': return h.cp >= 2
     case 'cp>=3': return h.cp >= 3
     case 'cp5': return h.cp >= 5
     case 'pack': return aliveOf(mob) >= 2
-    case 'opener': return fightT < 1.6
+    case 'opener': return fightT < mob.dist0 + 1.6
     case 'mana<20': return d.res === 'mana' && mana < 0.2
     case 'mana<30': return d.res === 'mana' && mana < 0.3
     case 'mana>40': return mana > 0.4
@@ -433,6 +586,7 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
     case 'res>=30': return h.res >= 30
     case 'res>=40': return h.res >= 40
     case 'res>=50': return h.res >= 50
+    case 'res>=60': return h.res >= 60
     case 'noShield': return h.shield <= 0
     case 'noHot': return !h.hot
     case 'hot': return !!h.hot
@@ -441,13 +595,18 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
     case 'notStunned': return mob.stun <= 0
     case 'noTemp': return !(h.temp[a.id] > 0)
     case 'lvl<10': return h.level < 10
+    case 'lvl<20': return h.level < 20
     case 'dot:immolate': return mob.dots.some((x) => x.id === 'immolate')
+    case 'fireTotem': return h.totems.some((t) => t.el === 'fire')
+    case 'shield': return h.equip.offhand?.weaponType === 'Shield'
+    case 'boss': return !!mob.boss || aliveOf(mob) >= 3
+    case 'twoTotems': return missingTotems(h).length >= 2
   }
   return true
 }
 
 // Domyślne warunki i priorytety wg rodzaju (gdy umiejętność nie ma własnych)
-const KIND_PRIO: Record<string, number> = { heal: 8, shield: 10, stun: 12, regen: 6, lifetap: 6, cooldown: 14, execute: 16, finisher: 25, dot: 36, drain: 45, hot: 9, strike: 60, spell: 60 }
+const KIND_PRIO: Record<string, number> = { heal: 8, shield: 10, stun: 12, regen: 6, lifetap: 6, totem: 4, cooldown: 14, execute: 16, finisher: 25, dot: 36, drain: 45, hot: 9, strike: 60, spell: 60 }
 function defaults(a: Ability): Cond[] {
   switch (a.kind) {
     case 'heal': return ['hp<45']
@@ -469,26 +628,38 @@ export function usableAbilities(h: Hero) {
 
 function rotation(s: GameState, d: Derived): Ability | null {
   const h = s.hero
+  const mob = s.mob!
   const g = grants(h)
   const shadowform = (d.m['school:shadow'] ?? 0) >= 0.15 && !h.disabled.shadowform && g.has('shadowform')
+  const missing = missingTotems(h, g)
   let best: Ability | null = null
   let bestP = Infinity
   let bestScore = -1
   for (const a of classById(h.cls).abilities) {
     if (a.kind === 'buff' || a.kind === 'proc' || a.kind === 'form' || a.kind === 'summon') continue
-    if (!knows(h, a, g) || h.disabled[a.id] || !formOk(h, a)) continue
+    if (!active(h, a, g)) continue
     if (h.cds[a.id] > 0) continue
+    if (mob.dist > 0 && isMelee(a) && !a.closes) continue // poza zasięgiem zwarcia
+    if (a.closes && mob.dist <= 0) continue
     if (shadowform && a.school === 'holy' && a.kind !== 'heal' && a.kind !== 'shield' && a.kind !== 'hot') continue
+    if (a.kind === 'totem') {
+      if (a.totem ? h.totems.some((t) => t.el === a.totem) : missing.length < 2) continue
+    }
     if (a.kind === 'lifetap') { if (!(a.when ?? []).every((c) => cond(s, d, c, a))) continue }
     else if (h.res < costOf(h, a, d)) continue
     if (a.kind === 'finisher') {
-      const fin = h.cp >= 5 || (h.cp >= 3 && (s.mob!.hp / s.mob!.maxHp < 0.3 || h.level < 10)) || (h.cp >= 1 && s.mob!.hp / s.mob!.maxHp < 0.08)
+      const fin = h.cp >= 5 || (h.cp >= 3 && (mob.hp / mob.maxHp < 0.3 || h.level < 10)) || (h.cp >= 1 && mob.hp / mob.maxHp < 0.08)
       if (!fin) continue
     }
-    const conds = [...defaults(a), ...(a.when ?? [])]
-    if (!conds.every((c) => cond(s, d, c, a))) continue
-    const p = a.prio ?? KIND_PRIO[a.kind] ?? 60
-    const score = (a.power ?? 1) / Math.max(1.5, a.cast ?? 0) * (a.aoe ? aliveOf(s.mob!) : 1)
+    let p = a.prio ?? KIND_PRIO[a.kind] ?? 60
+    // pełny Maelstrom: natychmiastowy Lightning Bolt; 4 ładunki Arcane Blast: Arcane Missiles
+    const special = (a.id === 'lightning_bolt' && (h.stacks.mw ?? 0) >= 5) || (a.id === 'arcane_missiles' && (h.stacks.ab ?? 0) >= 4)
+    if (special) p = 5
+    else {
+      const conds = [...defaults(a), ...(a.when ?? [])]
+      if (!conds.every((c) => cond(s, d, c, a))) continue
+    }
+    const score = (a.power ?? 1) / Math.max(1.5, a.cast ?? 0) * (a.aoe ? aliveOf(mob) : 1)
     if (p < bestP || (p === bestP && score > bestScore)) { best = a; bestP = p; bestScore = score }
   }
   return best
@@ -501,27 +672,36 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
   const cost = costOf(h, a, d)
   h.res = Math.max(0, h.res - cost)
   if (d.res === 'mana' && cost > 0) h.sinceCast = 0
-  if (a.cd) h.cds[a.id] = a.cd
+  if (a.cd) h.cds[a.id] = cdOf(a, d)
+  if (a.shareCd) h.cds[a.shareCd] = Math.max(h.cds[a.shareCd] ?? 0, cdOf(a, d))
+  if (a.id === 'arcane_shot') { const hawk = classById(h.cls).abilities.find((x) => x.id === 'summon_hawk'); if (hawk) h.cds.summon_hawk = Math.max(h.cds.summon_hawk ?? 0, h.cds.arcane_shot ?? 0) }
+  if (a.closes) mob.dist = 0
   const bp = basePower(a.talent ? h.level : Math.min(h.level, h.trained[a.id] ?? h.level))
   const beast = h.race === 'troll' && BEASTS.has(mob.type) ? 1.05 : 1
+  const vs = a.bonusVs?.includes(mob.type) ? 1.5 : 1
+  const dotB = a.dotBonus && mob.dots.some((x) => x.id === a.dotBonus) ? 1.2 : 1
   if (!a.cast) emit({ t: 'cast', ability: a.name, school: a.school, kind: a.kind })
   const phys = a.school === 'physical' || !a.school
-  const mult = dmgMult(d, a, phys) * beast
+  const mult = dmgMult(d, a, phys) * beast * vs * dotB
   const aoeN = a.aoe ? Math.min(3, aliveOf(mob)) : 1
-  const spellMiss = () => rng.chance(0.04 + Math.max(0, mob.lvl - h.level) * 0.03)
+  const up = Math.max(0, mob.lvl - h.level)
+  const spellMiss = () => rng.chance(missChance(d, up, true))
   const critMul = (p: boolean) => (p ? 2 + (d.m.critDmg ?? 0) : 1.5 + (d.m.critDmg ?? 0) / 2)
   if (a.gain) h.res = Math.min(d.res === 'mana' ? d.maxRes : 100, h.res + a.gain)
+  if (a.when?.includes('heroDodged')) h.heroDodged = false
+  if (a.reset) for (const id of a.reset) h.cds[id] = 0
 
   switch (a.kind) {
     case 'strike': {
-      if (rng.chance(0.05)) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: a.name }); return }
+      if (rng.chance(missChance(d, up, false))) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: a.name }); return }
       const crit = rng.chance(d.crit + (a.buff?.crit ?? 0))
       const base = a.school && a.school !== 'physical' ? whiteHit(d, rng) * 0.5 + bp * 0.6 * d.spellMult : whiteHit(d, rng) * 0.55 + bp * 0.55
-      hitMob(s, d, base * (a.power ?? 1) * (crit ? critMul(true) : 1) * mult * aoeN, crit, emit, a.school, a.name)
+      hitMob(s, d, base * (a.power ?? 1) * (crit ? critMul(true) : 1) * mult * aoeN * (a.aoe ? 1 : sweepMul(s, d)), crit, emit, a.school, a.name)
       if (a.heal) heal(h, d, d.maxHp * a.heal, emit, a.name)
       if (a.cp) h.cp = Math.min(5, h.cp + a.cp)
       if (a.stun && s.mob) s.mob.stun = Math.max(s.mob.stun, a.stun)
       if (a.id === 'overpower' || a.id === 'mongoose_bite') mob.dodged = false
+      maelstrom(h, d, rng)
       if (s.mob && s.mob.hp > 0) procs(s, d, rng, emit, 'hit')
       return
     }
@@ -535,6 +715,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       const cp = h.cp
       h.cp = 0
       if (a.stun) { mob.stun = Math.max(mob.stun, a.stun * cp); return }
+      if (a.buff) { h.temp[a.id] = (a.dur ?? 20) * (0.4 + cp * 0.12); return } // Expose Armor, Venom
       if (a.dur) {
         const total = (bp * 0.55 + d.ap * 0.12) * (a.power ?? 1) * cp * mult * (1 + (d.m.dot ?? 0))
         const ticks = Math.max(1, Math.round(a.dur / 3))
@@ -547,12 +728,19 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       return
     }
     case 'spell': case 'drain': {
+      if (a.buff && a.dur) h.temp[a.id] = a.dur // Drain Hope
       if (spellMiss()) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: a.name }); return }
+      let stack = 1
+      if (a.id === 'arcane_blast') { stack = 1 + 0.15 * (h.stacks.ab ?? 0); h.stacks.ab = Math.min(4, (h.stacks.ab ?? 0) + 1) }
+      if (a.id === 'arcane_missiles') { stack = 1 + 0.15 * (h.stacks.ab ?? 0); h.stacks.ab = 0 }
+      if (a.id === 'lightning_bolt') h.stacks.mw = 0
       const crit = rng.chance((phys ? d.crit : d.spellCrit) + (a.buff?.crit ?? 0))
       const base = phys ? whiteHit(d, rng) * 0.8 + bp * 0.4 : bp * d.spellMult * (0.92 + rng.next() * 0.16)
-      const dmg = base * (a.power ?? 1) * (crit ? critMul(phys) : 1) * mult * aoeN
+      const dmg = base * (a.power ?? 1) * (crit ? critMul(phys) : 1) * mult * aoeN * stack
       hitMob(s, d, dmg, crit, emit, a.school, a.name)
       if (a.heal) heal(h, d, dmg * a.heal, emit, a.name)
+      // Lightning Overload (Forever): darmowa kopia błyskawicy za połowę obrażeń
+      if ((a.id === 'lightning_bolt' || a.id === 'chain_lightning') && s.mob && s.mob.hp > 0 && rng.chance(d.m.overload ?? 0)) hitMob(s, d, dmg * 0.5, false, emit, a.school, `${a.name} (Overload)`)
       if (d.m.instant && a.cast) clearInstant(h)
       return
     }
@@ -566,6 +754,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       return
     }
     case 'heal': {
+      if (a.healPct) { heal(h, d, d.maxHp * a.healPct, emit, a.name); return }
       const hm = 1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)
       heal(h, d, bp * (a.power ?? 1) * d.spellMult * hm, emit, a.name)
       return
@@ -574,13 +763,16 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       const ticks = Math.max(1, Math.round((a.dur ?? 12) / 3))
       const hm = 1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)
       h.hot = { perTick: (bp * (a.power ?? 1) * d.spellMult * hm) / ticks, left: a.dur ?? 12, tickIn: 3 }
+      if (a.id === 'riptide') heal(h, d, bp * 1.2 * d.spellMult * hm, emit, a.name)
       return
     }
     case 'shield':
-      h.shield = bp * (a.power ?? 1) * d.spellMult * (1 + (d.m.shield ?? 0))
+      h.shield = a.shieldPct ? d.maxHp * a.shieldPct : bp * (a.power ?? 1) * d.spellMult * (1 + (d.m.shield ?? 0))
       return
     case 'stun':
-      mob.stun = Math.max(mob.stun, a.dur ?? 2)
+      if (a.cc) { if (aliveOf(mob) >= 2) mob.cc = Math.max(mob.cc, a.dur ?? 6) }
+      else mob.stun = Math.max(mob.stun, a.dur ?? 2)
+      if (a.cp) h.cp = Math.min(5, h.cp + a.cp)
       return
     case 'cooldown':
       h.temp[a.id] = a.dur ?? 10
@@ -588,6 +780,13 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
     case 'regen':
       h.res = Math.min(d.maxRes, h.res + d.maxRes * (a.power ?? 0.3))
       return
+    case 'totem': {
+      const list = a.totem ? [a] : missingTotems(h)
+      for (const t of list) placeTotem(h, t)
+      emit({ t: 'totem', name: a.totem ? a.name : list.map((x) => x.name.replace(' Totem', '')).join(', ') })
+      stats(h)
+      return
+    }
     case 'lifetap': {
       const amt = bp * 0.9 * (1 + (d.m['ab:life_tap'] ?? 0))
       h.hp = Math.max(1, h.hp - bp * 0.9)
@@ -621,16 +820,27 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
   for (let i = 0; i < mob.count; i++) {
     if (rng.chance(0.4 + lootBonus)) addLoot(s, makeJunk(rng, s.itemSeq++, mob.type, mob.lvl), emit)
     if (!mob.boss && rng.chance(0.11 + lootBonus)) addLoot(s, makeGear(rng, s.itemSeq++, h, mob.lvl), emit)
+    // humanoidy noszą przy sobie jedzenie i picie
+    if (mob.type === 'humanoid' && rng.chance(0.05)) {
+      const pool = FOODS.filter((f) => f.lvl <= mob.lvl && (f.kind !== 'buff' || rng.chance(0.15)))
+      if (pool.length) { const top = pool.filter((f) => f.kind === pool[pool.length - 1].kind); addLoot(s, makeFood(s.itemSeq++, rng.pick(top.slice(-2)), 1 + rng.int(0, 1)), emit) }
+    }
   }
   if (mob.boss) addLoot(s, makeGear(rng, s.itemSeq++, h, mob.lvl, mob.boss === 'zone' ? (rng.chance(0.1) ? 4 : 3) : rng.chance(0.25) ? 3 : 2), emit)
   if (!mob.boss && mob.type === 'humanoid' && rng.chance(0.006 * mob.count)) addLoot(s, makeBag(s.itemSeq++, mob.lvl < 20 ? 6 : mob.lvl < 40 ? 8 : 10, mob.lvl < 20 ? 'Linen Bag' : mob.lvl < 40 ? 'Woolen Bag' : 'Silk Bag'), emit)
 
   for (const q of s.quests) {
     if (q.have >= q.need || q.target !== mob.name) continue
-    let n = 0
-    for (let i = 0; i < mob.count; i++) if (q.kind !== 'collect' || rng.chance(0.55)) n++
-    if (!n) continue
-    q.have = Math.min(q.need, q.have + n)
+    if (q.kind === 'collect') {
+      // przedmioty zadania trafiają do toreb; postęp liczy się z tego, co masz
+      for (let i = 0; i < mob.count; i++) if (rng.chance(0.55) && countItems(h, (it) => it.quest === q.id) < q.need) {
+        const it = makeQuestItem(s.itemSeq++, q.item!, q.id)
+        if (!addToInv(h, it)) emit({ t: 'bagsfull', item: it })
+      }
+      const before = q.have
+      syncQuests(s)
+      if (q.have === before) continue
+    } else q.have = Math.min(q.need, q.have + mob.count)
     emit({ t: 'questprog', quest: q })
     if (q.have >= q.need) { emit({ t: 'questdone', quest: q }); log(s, `Zadanie gotowe do oddania: ${q.title}`, '#ffd100') }
   }
@@ -665,7 +875,8 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
   const needRest = h.hp < d.maxHp * 0.55 || (d.res === 'mana' && h.res < d.maxRes * 0.35)
   if (needRest) {
     s.phase = 'rest'
-    if (raceById(h.race).active === 'cannibalize' && h.hp < d.maxHp * 0.5) emit({ t: 'racial', name: 'Cannibalize' })
+    if (raceById(h.race).active === 'cannibalize' && h.hp < d.maxHp * 0.5 && !(h.cds.cannibalize > 0) && bestFood(h, 'food') < 0) emit({ t: 'racial', name: 'Cannibalize' })
+    startRest(s, d)
   } else { s.phase = 'walk'; s.phaseT = 2.5 + rng.next() * 2.5 }
 }
 
@@ -677,6 +888,7 @@ export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noo
   s.where = 'field'
   s.mob = null
   s.hero.casting = null
+  s.hero.totems = []
   s.phase = 'travel'
   s.phaseT = plan.total
   s.trip = { kind: plan.kind, label: plan.label || (changedZone ? `Podróż: ${zoneById(zone).name}` : ''), total: plan.total }
@@ -729,6 +941,8 @@ function onDeath(s: GameState, emit: Emit) {
   h.casting = null
   h.hot = null
   h.shield = 0
+  h.totems = []
+  h.eating = null
   s.mob = null
   s.phase = 'dead'
   s.phaseT = 30 * (1 - (raceById(h.race).mods.respawnPct ?? 0))

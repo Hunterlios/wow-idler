@@ -1,8 +1,9 @@
-import { classById, ranksOf } from '../data/classes'
+import { classById, ranksOf, startSkills } from '../data/classes'
 import { ROUTES } from '../data/zones'
 import { subsOf } from './world'
 import { newGame } from './sim'
-import { fixInv } from './inventory'
+import { fixInv, addToInv } from './inventory'
+import { makeQuestItem, makeFood, FOODS } from './items'
 import type { GameState, Item } from './types'
 
 const KEY = 'azeroth-idle-save-v1'
@@ -25,8 +26,9 @@ export function loadGame(): GameState | null {
 
 export function migrate(o: Any): GameState | null {
   if (!o || !o.hero) return null
-  if (o.v === 3) { fixInv(o.hero); return o as GameState }
-  if (o.v === 2) return v2to3(o)
+  if (o.v === 4) { fixInv(o.hero); return o as GameState }
+  if (o.v === 3) return v3to4(o)
+  if (o.v === 2) return v3to4(v2to3(o))
   if (o.v !== 1) return null
   // v1 -> v2: zachowaj postać, poziom, pieniądze i ekwipunek; odblokuj mapy przebyte na starej trasie
   const old = o
@@ -61,6 +63,45 @@ export function migrate(o: Any): GameState | null {
   s.speed = old.speed ?? 1
   s.log.push({ time: Date.now(), text: 'Zapis zaktualizowany do wersji 0.2: mapy z podstrefami, trener, zadania w mieście.', color: '#69ccf0' })
   return s
+}
+
+// v3 -> v4: wybór nasyceń/totemów, umiejętności broni, jedzenie, prawdziwe przedmioty zadań, odkup
+function v3to4(o: Any): GameState {
+  o.v = 4
+  const h = o.hero
+  const c = classById(h.cls)
+  h.choice ??= {}
+  h.totems ??= []
+  h.eating ??= null
+  h.wellFed ??= null
+  h.stacks ??= {}
+  h.heroDodged ??= false
+  // umiejętności broni: startowe + typy, które postać już nosi
+  const skills = new Set<string>(startSkills(c))
+  for (const it of Object.values(h.equip ?? {}) as Item[]) if (it?.weaponType && c.skills.includes(it.weaponType)) skills.add(it.weaponType)
+  h.weaponSkills = [...skills]
+  // nowe umiejętności z poziomu postaci: od razu wyuczone (żeby nie płacić za stare rangi drugi raz)
+  for (const a of c.abilities) {
+    if (a.talent || h.trained[a.id]) continue
+    const r = ranksOf(a).filter((x) => x <= h.level)
+    if (r.length && a.lvl <= Math.max(1, h.level - 6)) h.trained[a.id] = r[r.length - 1]
+  }
+  o.buyback ??= []
+  // drzewka talentów zmieniły się (WoW Forever): punkty wracają do rozdania za darmo
+  h.talents = {}
+  fixInv(h)
+  // postęp zadań "zbierz" zamieniony na przedmioty w torbach
+  for (const q of o.quests ?? []) {
+    if (q.kind !== 'collect' || !q.have) continue
+    addToInv(h, { ...makeQuestItem(o.itemSeq++, q.item, q.id), count: q.have })
+  }
+  // trochę jedzenia na start nowej wersji
+  const food = FOODS.filter((f) => f.kind === 'food' && f.lvl <= h.level).pop()!
+  addToInv(h, makeFood(o.itemSeq++, food, 10))
+  if (c.resource === 'mana') addToInv(h, makeFood(o.itemSeq++, FOODS.filter((f) => f.kind === 'drink' && f.lvl <= h.level).pop()!, 10))
+  if (o.mob) { o.mob.dist ??= 0; o.mob.dist0 ??= 0; o.mob.cc ??= 0 }
+  o.log?.push({ time: Date.now(), text: 'Wersja 0.4: przeciąganie przedmiotów, jedzenie i picie, totemy, umiejętności broni, talenty z WoW Forever. Punkty talentów zwrócone — rozdaj je od nowa (N).', color: '#69ccf0' })
+  return o as GameState
 }
 
 function v2to3(o: Any): GameState {

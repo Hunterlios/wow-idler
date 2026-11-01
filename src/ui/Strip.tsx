@@ -3,8 +3,8 @@ import { classById } from '../data/classes'
 import { raceById } from '../data/races'
 import { zoneById } from '../data/zones'
 import { talentPoints, spentTotal } from '../data/talents'
-import { xpToNext, MAX_LEVEL, grants, knows, formOk } from '../game/formulas'
-import { stats, activePet, bossState, costOf, learnableCount } from '../game/sim'
+import { xpToNext, MAX_LEVEL, grants, active } from '../game/formulas'
+import { stats, activePet, bossState, costOf, cdOf, learnableCount } from '../game/sim'
 import { subOf, subsOf, townOf, capitalOf, zonePct } from '../game/world'
 import { capacity, usedSlots } from '../game/inventory'
 import { questReady } from '../game/quests'
@@ -13,6 +13,7 @@ import { Scene } from '../render/scene'
 import { abilityIcon, itemIcon, menuIcon } from '../render/icons'
 import { Bar, Hover, Money } from './common'
 import { layout, saveLayout, startDrag, uiScale } from './layout'
+import { beginItemDrag } from './dnd'
 import { isOverlay, native } from '../platform'
 
 export type PanelId = 'char' | 'bags' | 'map' | 'log' | 'settings' | 'quests' | 'spells' | 'talents'
@@ -53,16 +54,18 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   const town = townOf(z, h.faction)
   const inTown = s.where !== 'field'
   const phaseText =
-    s.phase === 'town' ? (s.where === 'capital' ? `W stolicy: ${capitalOf(s)}` : `W mieście: ${town}`)
+    s.phase === 'fight' && s.mob && s.mob.dist > 0 ? `${s.mob.name}${s.mob.count > 1 ? ` ×${s.mob.count}` : ''} (${s.mob.lvl}) nadchodzi...`
+    : s.phase === 'town' ? (s.where === 'capital' ? `W stolicy: ${capitalOf(s)}` : `W mieście: ${town}`)
     : s.phase === 'fight' && s.mob ? `Walka: ${s.mob.name}${s.mob.count > 1 ? ` ×${s.mob.count}` : ''} (${s.mob.lvl})`
-    : s.phase === 'rest' ? (d.res === 'mana' ? 'Je i pije...' : 'Je...')
+    : s.phase === 'rest' ? (h.eating && (h.eating.hp || h.eating.mana) && h.eating.left > 0 ? (h.eating.hp && h.eating.mana ? 'Je i pije...' : h.eating.mana ? 'Pije...' : 'Je...') : 'Odpoczywa (brak jedzenia)...')
+    : s.phase === 'fight' && s.mob && s.mob.dist > 0 ? `${s.mob.name} nadchodzi...`
     : s.phase === 'dead' ? 'Duch'
     : s.phase === 'travel' ? (s.trip?.label || `Podróż: ${sub.name}`)
     : 'Szuka celu...'
   const cast = h.casting
   const pet = activePet(h)
   const g = grants(h)
-  const bar = c.abilities.filter((a) => knows(h, a, g) && !h.disabled[a.id] && a.kind !== 'form' && a.kind !== 'summon' && formOk(h, a))
+  const bar = c.abilities.filter((a) => active(h, a, g) && a.kind !== 'form' && a.kind !== 'summon' && a.id !== 'totemic_projection')
   const learnable = learnableCount(h)
   const freeTalents = talentPoints(h.level) - spentTotal(h.talents)
   const readyQuests = s.quests.filter(questReady).length
@@ -111,7 +114,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
           {cast ? (
             <Bar className="castbar" value={cast.total - cast.left} max={cast.total} color="linear-gradient(#ffd24a,#b08000)" label={c.abilities.find((a) => a.id === cast.id)?.name} height={10} />
           ) : (
-            <div className="phase">{phaseText}{h.cp > 0 && <span className="cp">{'●'.repeat(h.cp)}</span>}{pet && <span className="pet"> · {pet.name}</span>}</div>
+            <div className="phase">{phaseText}{h.cp > 0 && <span className="cp">{'●'.repeat(h.cp)}</span>}{(h.stacks.mw ?? 0) > 0 && <span className="cp mw">{'◆'.repeat(h.stacks.mw)}</span>}{(h.stacks.ab ?? 0) > 0 && <span className="cp ab">{'✦'.repeat(h.stacks.ab)}</span>}{pet && <span className="pet"> · {pet.name}</span>}{h.wellFed && <span className="wellfed" title={`${h.wellFed.name}: Well Fed`}> · 🍖</span>}</div>
           )}
         </div>
       </div>
@@ -145,13 +148,13 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
 
       <div className="actionbar">
         {bar.map((a, i) => {
-          const cd = h.cds[a.id] > 0 && a.cd ? h.cds[a.id] / a.cd : 0
+          const cd = h.cds[a.id] > 0 && a.cd ? Math.min(1, h.cds[a.id] / cdOf(a, d)) : 0
           const passive = a.kind === 'buff' || a.kind === 'proc'
           const oom = !passive && a.kind !== 'lifetap' && h.res < costOf(h, a, d)
-          const active = (h.temp[a.id] ?? 0) > 0
+          const on = (h.temp[a.id] ?? 0) > 0 || h.totems.some((t) => t.id === a.id)
           return (
-            <Hover key={a.id} anchor="above" className={`abtn ${passive ? 'passive' : ''} ${oom ? 'oom' : ''} ${cast?.id === a.id || active ? 'casting' : ''}`}
-              tip={<Tip title={a.name}><div className="tt-dim">{a.cost ? `${costOf(h, a, d)} ${d.res === 'mana' ? 'Mana' : d.res === 'rage' ? 'Rage' : 'Energy'}` : passive ? 'Pasywna' : 'Bez kosztu'}{a.cd ? ` · CD ${a.cd} s` : ''}{a.cast ? ` · ${a.cast} s` : ' · natychmiast'}</div><div>{a.desc}</div><div className="tt-dim">Wyłączysz ją w księdze umiejętności (P).</div></Tip>}>
+            <Hover key={a.id} anchor="above" className={`abtn ${passive ? 'passive' : ''} ${oom ? 'oom' : ''} ${cast?.id === a.id || on ? 'casting' : ''}`}
+              tip={<Tip title={a.name}><div className="tt-dim">{a.cost ? `${costOf(h, a, d)} ${d.res === 'mana' ? 'Mana' : d.res === 'rage' ? 'Rage' : 'Energy'}` : passive ? 'Pasywna' : 'Bez kosztu'}{a.cd ? ` · CD ${cdOf(a, d)} s` : ''}{a.cast ? ` · ${a.cast} s` : ' · natychmiast'}</div><div>{a.desc}</div><div className="tt-dim">Wyłączysz ją w księdze umiejętności (P).</div></Tip>}>
               <img src={abilityIcon(a, h.cls)} alt="" draggable={false} />
               {cd > 0 && <div className="cd" style={{ background: `conic-gradient(rgba(0,0,0,.7) ${cd * 360}deg, transparent 0)` }} />}
               {i < 12 && <span className="hk">{i < 9 ? i + 1 : i === 9 ? 0 : i === 10 ? '-' : '='}</span>}
@@ -176,13 +179,14 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         {[3, 2, 1, 0].map((i) => {
           const bag = h.bags[i]
           return (
-            <Hover key={i} anchor="above" className={`bagslot ${bag ? '' : 'empty'}`} onClick={() => toggle('bags')}
-              tip={bag ? <Tip title={bag.name}><div>{bag.bagSize} Slot Bag</div><div className="tt-dim">Zdejmiesz ją przyciskiem w oknie torby.</div></Tip> : <Tip title="Pusty slot na torbę"><div className="tt-dim">Torby kupisz u kupca w stolicy.</div></Tip>}>
+            <Hover key={i} anchor="above" className={`bagslot ${bag ? '' : 'empty'}`} onClick={() => toggle('bags')} drop={`bag:${i}`}
+              onPointerDown={bag ? (e) => beginItemDrag(e, { k: 'bag', i }, itemIcon(bag)) : undefined}
+              tip={bag ? <Tip title={bag.name}><div>{bag.bagSize} Slot Bag</div><div className="tt-dim">Przeciągnij na wolne miejsce w innej torbie, żeby ją zdjąć. Upuść tu przedmiot, żeby go do niej włożyć.</div></Tip> : <Tip title="Pusty slot na torbę"><div className="tt-dim">Przeciągnij tu torbę z plecaka. Torby kupisz u kupca w stolicy.</div></Tip>}>
               {bag && <img src={itemIcon(bag)} alt="" draggable={false} />}
             </Hover>
           )
         })}
-        <Hover anchor="above" className={`bagslot backpack ${open.has('bags') ? 'on' : ''}`} onClick={() => toggle('bags')}
+        <Hover anchor="above" className={`bagslot backpack ${open.has('bags') ? 'on' : ''}`} onClick={() => toggle('bags')} drop="bag:-1"
           tip={<Tip title="Backpack (B)"><div>{usedSlots(h)}/{capacity(h)} zajętych</div></Tip>}>
           <img src={itemIcon({ id: -1, name: 'Backpack', rarity: 1, ilvl: 1, value: 0, bagSize: 16 })} alt="" draggable={false} />
           <span className={`bb-free ${capacity(h) - usedSlots(h) === 0 ? 'full' : ''}`}>{capacity(h) - usedSlots(h)}</span>

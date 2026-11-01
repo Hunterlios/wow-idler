@@ -1,6 +1,6 @@
 // Generator łupów w stylu Classica: szare śmieci, białe, zielone z sufiksami "of the Bear/Eagle/...",
 // niebieskie i (rzadko) fioletowe; pełny zestaw slotów okna postaci; torby.
-import { classById, type ArmorType, type ClassId } from '../data/classes'
+import { classById, ONE_HAND, TWO_HAND, RANGED, type ArmorType, type ClassId } from '../data/classes'
 import type { Stats } from '../data/races'
 import type { MobType } from '../data/zones'
 import type { EquipSlot, Hero, Item, ItemSlot, Rarity } from './types'
@@ -27,10 +27,11 @@ const SLOT_K: Record<ItemSlot, number> = {
 }
 const RAR_K = [0.7, 0.9, 1, 1.15, 1.3]
 export const WEAPON_SPEED: Record<string, number> = {
-  Dagger: 1.8, Sword: 2.5, Axe: 2.6, Mace: 2.7, Greatsword: 3.4, Greataxe: 3.5, Maul: 3.6, Staff: 3.0,
+  Dagger: 1.8, 'Fist Weapon': 2.0, Sword: 2.5, Axe: 2.6, Mace: 2.7, Greatsword: 3.4, Greataxe: 3.5, Maul: 3.6, Polearm: 3.4, Staff: 3.0,
   Bow: 2.8, Gun: 2.8, Crossbow: 3.0, Wand: 1.6, Thrown: 2.0,
 }
-const TWO = new Set(['Greatsword', 'Greataxe', 'Maul', 'Staff'])
+const TWO = new Set(TWO_HAND)
+const WEAPON_NOUN: Record<string, string> = { 'Fist Weapon': 'Claw', Polearm: 'Halberd' }
 const WEAPON_TIER = ['Worn', 'Sharp', 'Tempered', 'Heavy', 'Masterwork']
 const RARE_PREFIX = ['Glimmering', 'Robust', 'Ornate', 'Runed', 'Brilliant', 'Sturdy', 'Ancient', 'Enchanted']
 const EPIC_PREFIX = ['Sunforged', 'Stormforged', 'Starforged', 'Duskforged', 'Titanic']
@@ -91,16 +92,20 @@ const GEAR_SLOTS: ItemSlot[] = ['chest', 'legs', 'head', 'shoulder', 'hands', 'f
 export function makeGear(rng: Rng, seq: number, hero: Hero, ilvlIn: number, forced?: Rarity): Item {
   const cls = classById(hero.cls)
   let slot = rng.pick(GEAR_SLOTS)
+  const own = (pool: string[]) => pool.filter((w) => cls.skills.includes(w))
   if (slot === 'offhand' && !cls.weapons.off.length) slot = 'mainhand'
-  if (slot === 'ranged' && !cls.weapons.ranged.length) slot = 'mainhand'
-  if (slot === 'mainhand' && cls.weapons.two.length && rng.chance(cls.style === 'caster' ? 0.6 : 0.35)) slot = 'twohand'
+  if (slot === 'ranged' && !own(RANGED).length && rng.chance(0.6)) slot = 'mainhand'
+  if (slot === 'mainhand' && rng.chance(own(TWO_HAND).length ? (cls.style === 'caster' ? 0.6 : 0.35) : 0.2)) slot = 'twohand'
   let rarity = forced ?? rollRarity(rng)
   if ((slot === 'neck' || slot === 'finger' || slot === 'trinket') && rarity < 2) rarity = 2 // biżuteria tylko z bonusami
   const ilvl = Math.max(1, ilvlIn + (rarity >= 3 ? 2 : 0) + (rarity === 4 ? 3 : 0))
   const item: Item = { id: seq, name: '', rarity, ilvl, value: 0, slot }
   let name: string
   if (slot === 'mainhand' || slot === 'twohand' || slot === 'ranged' || (slot === 'offhand' && rng.chance(0.5) && cls.weapons.off.includes('Shield'))) {
-    const pool = slot === 'mainhand' ? cls.weapons.main : slot === 'twohand' ? cls.weapons.two : slot === 'ranged' ? cls.weapons.ranged : ['Shield']
+    // broń: zwykle typ, którego klasa może się nauczyć, ale czasem dowolny (jak losowe dropy w grze)
+    const any = slot === 'mainhand' ? ONE_HAND : slot === 'twohand' ? TWO_HAND : slot === 'ranged' ? RANGED : ['Shield']
+    const mine = slot === 'offhand' ? any : own(any)
+    const pool = mine.length && rng.chance(0.6) ? mine : any
     const wt = rng.pick(pool)
     item.weaponType = wt
     if (wt === 'Shield') {
@@ -109,7 +114,7 @@ export function makeGear(rng: Rng, seq: number, hero: Hero, ilvlIn: number, forc
     } else {
       item.speed = WEAPON_SPEED[wt] ?? 2.5
       item.dps = Math.round((1.6 + 0.55 * ilvl) * RAR_K[rarity] * (TWO.has(wt) ? 1.3 : 1) * 10) / 10
-      name = `${WEAPON_TIER[TIER(ilvl)]} ${wt}`
+      name = `${WEAPON_TIER[TIER(ilvl)]} ${WEAPON_NOUN[wt] ?? wt}`
     }
   } else if (slot === 'neck' || slot === 'finger' || slot === 'trinket' || slot === 'offhand') {
     item.weaponType = slot === 'offhand' ? 'Orb' : undefined
@@ -172,12 +177,13 @@ export function canWear(hero: Hero, it: Item) {
     const order: ArmorType[] = ['cloth', 'leather', 'mail', 'plate']
     return order.indexOf(it.armorType) <= order.indexOf(armorFor(hero.cls, hero.level))
   }
-  if (it.slot === 'mainhand') return !it.weaponType || c.weapons.main.includes(it.weaponType)
-  if (it.slot === 'twohand') return !!it.weaponType && c.weapons.two.includes(it.weaponType)
-  if (it.slot === 'ranged') return !!it.weaponType && c.weapons.ranged.includes(it.weaponType)
   if (it.slot === 'offhand') return !!it.weaponType && c.weapons.off.includes(it.weaponType)
+  if (it.slot === 'mainhand' || it.slot === 'twohand' || it.slot === 'ranged') return !it.weaponType || (hero.weaponSkills ?? []).includes(it.weaponType)
   return true
 }
+// Broń, której klasa może się nauczyć, ale postać jeszcze nie umie
+export const learnableWeapon = (hero: Hero, it: Item) =>
+  !!it.weaponType && it.slot !== 'offhand' && classById(hero.cls).skills.includes(it.weaponType) && !(hero.weaponSkills ?? []).includes(it.weaponType)
 
 // Do którego slotu trafi przedmiot (pierścienie / błyskotki: wolny albo słabszy)
 export function targetSlot(hero: Hero, it: Item): EquipSlot | null {
@@ -219,3 +225,36 @@ export function starterGear(hero: Hero): Item[] {
 }
 
 export const slotOfEquipped = (s: EquipSlot) => s
+
+// ---------------------------------------------------------------- jedzenie i picie (nazwy jak u kupców Classica)
+export type FoodDef = { name: string; kind: 'food' | 'drink' | 'buff'; lvl: number; amt: number; price: number; buff?: { name: string; fx: Record<string, number>; text: string } }
+export const FOODS: FoodDef[] = [
+  { name: 'Tough Hunk of Bread', kind: 'food', lvl: 1, amt: 61, price: 2 },
+  { name: 'Freshly Baked Bread', kind: 'food', lvl: 5, amt: 243, price: 5 },
+  { name: 'Moist Cornbread', kind: 'food', lvl: 15, amt: 552, price: 15 },
+  { name: 'Mulgore Spice Bread', kind: 'food', lvl: 25, amt: 874, price: 25 },
+  { name: 'Soft Banana Bread', kind: 'food', lvl: 35, amt: 1392, price: 40 },
+  { name: 'Homemade Cherry Pie', kind: 'food', lvl: 45, amt: 2148, price: 60 },
+  { name: 'Refreshing Spring Water', kind: 'drink', lvl: 1, amt: 151, price: 2 },
+  { name: 'Ice Cold Milk', kind: 'drink', lvl: 5, amt: 436, price: 5 },
+  { name: 'Melon Juice', kind: 'drink', lvl: 15, amt: 835, price: 15 },
+  { name: 'Sweet Nectar', kind: 'drink', lvl: 25, amt: 1344, price: 25 },
+  { name: 'Moonberry Juice', kind: 'drink', lvl: 35, amt: 1992, price: 40 },
+  { name: 'Morning Glory Dew', kind: 'drink', lvl: 45, amt: 2934, price: 60 },
+  { name: 'Herb Baked Egg', kind: 'buff', lvl: 1, amt: 0, price: 50, buff: { name: 'Well Fed', fx: { sta: 3, spi: 3 }, text: '+3 Stamina i Spirit' } },
+  { name: 'Crocolisk Steak', kind: 'buff', lvl: 15, amt: 0, price: 200, buff: { name: 'Well Fed', fx: { sta: 6, spi: 6 }, text: '+6 Stamina i Spirit' } },
+  { name: 'Curiously Tasty Omelet', kind: 'buff', lvl: 25, amt: 0, price: 500, buff: { name: 'Well Fed', fx: { sta: 8, spi: 8 }, text: '+8 Stamina i Spirit' } },
+  { name: 'Grilled Squid', kind: 'buff', lvl: 35, amt: 0, price: 1000, buff: { name: 'Well Fed', fx: { agi: 10 }, text: '+10 Agility' } },
+  { name: 'Nightfin Soup', kind: 'buff', lvl: 35, amt: 0, price: 1000, buff: { name: 'Well Fed', fx: { castRegen: 0.1 }, text: '+10% regeneracji many w walce' } },
+  { name: 'Monster Omelet', kind: 'buff', lvl: 40, amt: 0, price: 1500, buff: { name: 'Well Fed', fx: { sta: 12, spi: 12 }, text: '+12 Stamina i Spirit' } },
+  { name: 'Runn Tum Tuber Surprise', kind: 'buff', lvl: 45, amt: 0, price: 2000, buff: { name: 'Well Fed', fx: { int: 10 }, text: '+10 Intellect' } },
+  { name: 'Smoked Desert Dumplings', kind: 'buff', lvl: 45, amt: 0, price: 2000, buff: { name: 'Well Fed', fx: { str: 20 }, text: '+20 Strength' } },
+  { name: "Dirge's Kickin' Chimaerok Chops", kind: 'buff', lvl: 55, amt: 0, price: 4000, buff: { name: 'Well Fed', fx: { sta: 25 }, text: '+25 Stamina' } },
+]
+export const WELL_FED_SECS = 15 * 60
+export function makeFood(seq: number, def: FoodDef, count = 1): Item {
+  return { id: seq, name: def.name, rarity: 1, ilvl: def.lvl, value: Math.max(1, Math.round(def.price / 4)), count, food: { kind: def.kind, lvl: def.lvl, amt: def.amt, buff: def.buff } }
+}
+export function makeQuestItem(seq: number, name: string, questId: string): Item {
+  return { id: seq, name, rarity: 1, ilvl: 1, value: 0, quest: questId, count: 1 }
+}

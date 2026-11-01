@@ -4,7 +4,7 @@ import { RACES } from '../src/data/races'
 import { newGame, advance } from '../src/game/sim'
 import { zoneById } from '../src/data/zones'
 import { boardFor, acceptQuest, questReady } from '../src/game/quests'
-import { enterTown, enterCapital, leaveTown, trainAll, sellJunk, turnIn, buyBag } from '../src/game/town'
+import { enterTown, enterCapital, leaveTown, trainAll, sellJunk, turnIn, buyBag, restock } from '../src/game/town'
 import { BAGS_FOR_SALE } from '../src/game/items'
 import { autoTalents } from '../src/game/talents'
 import type { GameState } from '../src/game/types'
@@ -22,8 +22,9 @@ export function visit(s: GameState) {
   trainAll(s)
   autoTalents(s, spec)
   if (s.hero.cls === 'warlock' && s.hero.trained.summon_voidwalker) s.hero.pet = 'voidwalker'
-  s.hero.inv.forEach((it, i) => { if (it && !it.bagSize) { s.hero.inv[i] = null; s.hero.copper += it.value * (it.count ?? 1) } })
+  s.hero.inv.forEach((it, i) => { if (it && !it.bagSize && !it.food && !it.quest) { s.hero.inv[i] = null; s.hero.copper += it.value * (it.count ?? 1) } })
   sellJunk(s)
+  if (!process.env.NOFOOD) restock(s, Number(process.env.FOOD ?? 2))
   for (const b of [...BAGS_FOR_SALE].reverse()) if (s.hero.bags.some((x) => !x) && s.hero.copper > b.price * 3) buyBag(s, b.size)
   // oddaj zadania we wszystkich miastach odblokowanych map
   for (const z of s.unlocked) {

@@ -41,8 +41,13 @@ export type Item = {
   speed?: number
   stats?: Partial<Stats>
   bagSize?: number // torba
-  count?: number // stos (śmieci)
+  count?: number // stos (śmieci, jedzenie, przedmioty zadań)
+  food?: Food // jedzenie / picie / jedzenie z buffem
+  quest?: string // id zadania, do którego należy przedmiot
 }
+
+// Jedzenie i picie (kupowane u kupca). Zwykłe odnawia HP/manę przy odpoczynku, z buffem daje Well Fed.
+export type Food = { kind: 'food' | 'drink' | 'buff'; lvl: number; amt: number; buff?: { name: string; fx: Record<string, number>; text: string } }
 
 export type Dot = { id: string; name: string; school: School; perTick: number; left: number; tickIn: number }
 
@@ -62,7 +67,12 @@ export type MobState = {
   count: number // ile mobów w grupie (1-3)
   per: number // HP jednego moba w grupie
   boss?: 'mini' | 'zone'
+  dist: number // ile sekund wróg jeszcze podchodzi (zwarcie dopiero przy 0)
+  dist0: number
+  cc: number // jeden z grupy obezwładniony (Polymorph, Freezing Trap)
 }
+
+export type TotemState = { id: string; el: string; left: number; tickIn: number }
 
 export type Phase = 'walk' | 'fight' | 'rest' | 'dead' | 'travel' | 'town'
 export type Where = 'field' | 'town' | 'capital'
@@ -88,6 +98,13 @@ export type Hero = {
   form: Form // druid
   pet: string // wybrany demon (warlock)
   temp: Record<string, number> // aktywne cooldowny-buffy (s)
+  choice: Record<string, string> // wybór w grupach (nasycenie broni, pieczęć, aura, totem żywiołu)
+  totems: TotemState[] // postawione totemy (znikają, gdy postać odchodzi)
+  weaponSkills: string[] // wyuczone typy broni
+  eating: { hp: number; mana: number; left: number } | null // jedzenie/picie w trakcie odpoczynku (na sekundę)
+  wellFed: { name: string; fx: Record<string, number>; left: number } | null // buff z jedzenia
+  stacks: Record<string, number> // ładunki: Maelstrom, Arcane Blast
+  heroDodged: boolean
   cds: Record<string, number>
   buffs: Record<string, number>
   casting: { id: string; left: number; total: number } | null
@@ -139,6 +156,7 @@ export type GameEvent =
   | { t: 'questdone'; quest: Quest }
   | { t: 'spawn'; mob: string; lvl: number; boss?: 'mini' | 'zone' }
   | { t: 'racial'; name: string }
+  | { t: 'totem'; name: string }
 
 export type LogLine = { time: number; text: string; color?: string }
 
@@ -147,7 +165,7 @@ export type Totals = { kills: number; deaths: number; copper: number; xp: number
 export type Trip = { kind: 'walk' | 'ship' | 'zeppelin'; label: string; total: number }
 
 export type GameState = {
-  v: 3
+  v: 4
   seed: number
   itemSeq: number
   hero: Hero
@@ -164,6 +182,7 @@ export type GameState = {
   mob: MobState | null
   quests: Quest[]
   questsDone: string[]
+  buyback: Item[] // ostatnie sprzedane (max 10)
   totals: Totals
   log: LogLine[]
   savedAt: number
