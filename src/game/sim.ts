@@ -1,10 +1,10 @@
 // Rdzeń gry: czysta funkcja kroku symulacji (bez DOM). Ten sam kod liczy grę na żywo,
 // progres offline i testy balansu.
-import { classById, isMelee, startSkills, type Ability, type Cond, type PetDef } from '../data/classes'
+import { classById, isMelee, startSkills, type Ability, type Cond, type PetDef, type School } from '../data/classes'
 import { raceById, type RaceId } from '../data/races'
 import type { ClassId } from '../data/classes'
 import { zoneById, ROUTES } from '../data/zones'
-import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, mobXp, rageConv, resourceOf, styleOf, xpToNext, MAX_LEVEL, spellValue, spCoef, type Derived } from './formulas'
+import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, mobXp, rageConv, resourceOf, styleOf, hasRanged, hasWand, modeOf, xpToNext, MAX_LEVEL, spellValue, spCoef, type Derived } from './formulas'
 import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOODS, damageGear } from './items'
 import { attackTable, trySkillUp, skillOf } from './wskill'
 import { RACIAL_ACTIVE, type RacialId } from '../data/races'
@@ -456,7 +456,7 @@ function onContact(s: GameState, emit: Emit) {
   const h = s.hero
   const mob = s.mob
   if (!mob) return
-  if (racialReady(h, 'warstomp')) { mob.stun = Math.max(mob.stun, 2); racial(s, 'warstomp', emit) }
+  if (racialReady(h, 'warstomp')) { applyCC(s, 'warstomp', 2); racial(s, 'warstomp', emit) }
   else if (racialReady(h, 'escape') && styleOf(h) === 'caster') { mob.dist = 2; racial(s, 'escape', emit) }
 }
 // Czy postać teraz bije białymi atakami (także caster bez many albo z wyłączonymi czarami)
@@ -466,7 +466,7 @@ export function autoAttacking(s: GameState) {
   const style = styleOf(h)
   const d = stats(h)
   const lowMana = d.res === 'mana' && h.res < d.maxRes * 0.12
-  return (style !== 'caster' || lowMana || lastNoAction) && (style === 'ranged' || s.mob.dist <= 0)
+  return (style !== 'caster' || lowMana || lastNoAction) && (style === 'ranged' || (style === 'caster' && hasWand(h)) || s.mob.dist <= 0)
 }
 
 // Czy postać walczy teraz wręcz. Łowca: pupil trzyma wroga, a łowca strzela; bez pupila (albo w stylu
@@ -476,7 +476,7 @@ export function heroInMelee(s: GameState) {
   if (!mob || mob.dist > 0) return false
   const h = s.hero
   if (h.cls !== 'hunter') return true
-  return h.mode === 'melee' || !activePet(h)
+  return modeOf(h) === 'melee' || !activePet(h)
 }
 export function swingSpeed(s: GameState, d = stats(s.hero)) {
   return s.hero.cls === 'hunter' && heroInMelee(s) ? d.melee.speed : d.weaponSpeed
@@ -490,7 +490,7 @@ export function isHybrid(h: Hero) {
 }
 // Czy postać od razu biegnie do wroga (brak aktywnych czarów z dystansu albo styl "Wręcz")
 function closesIn(h: Hero) {
-  if (h.cls === 'hunter') return h.mode === 'melee'
+  if (h.cls === 'hunter') return modeOf(h) === 'melee'
   if (styleOf(h) !== 'melee') return false
   if (h.mode === 'melee') return true
   const g = grants(h)
@@ -498,8 +498,54 @@ function closesIn(h: Hero) {
 }
 
 let fightT = 0
+let ticking = false
+const NEEDS_RANGED = /shot|sting|volley|rapid_fire/
+// Kontrola tłumu: co dokładnie robi każda umiejętność (ogłuszenie, unieruchomienie, strach, spowolnienie, obezwładnienie jednego z grupy)
+type CCEff = { e: 'stun' | 'root' | 'fear' | 'slow' | 'cc'; look: string; dur?: number }
+const CC: Record<string, CCEff> = {
+  charge: { e: 'stun', look: 'stun' }, intimidating_shout: { e: 'fear', look: 'fear' }, piercing_howl: { e: 'slow', look: 'slow', dur: 6 },
+  concussion_blow: { e: 'stun', look: 'stun' }, hammer_justice: { e: 'stun', look: 'stun' }, voice_of_truth: { e: 'stun', look: 'silence' },
+  repentance: { e: 'stun', look: 'sleep' }, concussive_shot: { e: 'slow', look: 'slow', dur: 4 }, wing_clip: { e: 'slow', look: 'slow', dur: 10 },
+  freezing_trap: { e: 'cc', look: 'ice' }, intimidation: { e: 'stun', look: 'stun' }, scatter_shot: { e: 'stun', look: 'daze' },
+  counterattack: { e: 'root', look: 'root', dur: 5 }, wyvern_sting: { e: 'stun', look: 'sleep' }, gouge: { e: 'stun', look: 'daze' },
+  cheap_shot: { e: 'stun', look: 'stun' }, kidney_shot: { e: 'stun', look: 'stun' }, blind: { e: 'cc', look: 'blind' },
+  psychic_scream: { e: 'fear', look: 'fear' }, silence: { e: 'stun', look: 'silence' }, polymorph: { e: 'cc', look: 'poly' },
+  frost_nova: { e: 'root', look: 'ice' }, fear: { e: 'fear', look: 'fear' }, howl_terror: { e: 'fear', look: 'fear' },
+  entangling_roots: { e: 'root', look: 'root' }, bash: { e: 'stun', look: 'stun' }, pounce: { e: 'stun', look: 'stun' },
+  feral_charge: { e: 'root', look: 'root', dur: 4 }, warstomp: { e: 'stun', look: 'stun' },
+}
+export function applyCC(s: GameState, id: string, dur: number) {
+  const mob = s.mob
+  if (!mob || dur <= 0) return
+  const c = CC[id] ?? { e: 'stun', look: 'stun' }
+  const t = c.dur ?? dur
+  const style = styleOf(s.hero)
+  mob.by = { ...(mob.by ?? {}), [c.e === 'cc' && aliveOf(mob) < 2 ? 'stun' : c.e]: id }
+  switch (c.e) {
+    case 'stun': mob.stun = Math.max(mob.stun, t); mob.cct = c.look; return
+    case 'slow': mob.slow = Math.max(mob.slow, t); return
+    case 'cc':
+      if (aliveOf(mob) >= 2) { mob.cc = Math.max(mob.cc, t); mob.ccl = c.look }
+      else { mob.stun = Math.max(mob.stun, Math.min(t, 4)); mob.cct = c.look } // pojedynczy wróg: krótko obezwładniony (pęka od obrażeń)
+      return
+    case 'root':
+      mob.root = Math.max(mob.root ?? 0, t); mob.rootl = c.look
+      // w zwarciu postać dystansowa odskakuje, póki wróg jest unieruchomiony
+      if (mob.dist <= 0 && style !== 'melee') { mob.dist = Math.min(1.6, t * 0.5); mob.dist0 = Math.max(mob.dist0, mob.dist + 0.5) }
+      return
+    case 'fear':
+      mob.fear = Math.max(mob.fear ?? 0, t)
+      if (style === 'melee') { mob.stun = Math.max(mob.stun, t * 0.6); mob.cct = 'fear' } // wojownik nie goni uciekających: krótkie obezwładnienie
+      return
+  }
+}
 const BEASTS = new Set(['beast', 'cat', 'boar', 'raptor'])
-const missChance = (d: Derived, up: number, spell: boolean) => Math.max(0, (spell ? 0.04 + up * 0.03 : 0.05 + up * 0.02) - (d.m.hit ?? 0))
+// Classic: trafienie czarem 96/95/94% na +0..+2, potem skok: 83/72/61% na +3..+5 i -11% na każdy kolejny poziom
+export const spellMissBase = (up: number) => up <= 2 ? 0.04 + up * 0.01 : Math.min(0.99, 0.06 + (up - 2) * 0.11)
+const missChance = (d: Derived, up: number, spell: boolean) => Math.max(spell && up > 2 ? 0.01 : 0, (spell ? spellMissBase(up) : 0.05 + up * 0.02) - (d.m.hit ?? 0))
+// Wróg wyższy o kilka poziomów: częściej trafia krytycznie, rzadziej pudłuje, od +3 zadaje miażdżące ciosy (150%)
+export const mobCritChance = (up: number) => Math.min(0.35, 0.05 + 0.025 * Math.max(0, up))
+export const crushChance = (up: number) => up >= 3 ? Math.min(0.45, 0.12 * (up - 2)) : 0
 
 function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   const h = s.hero
@@ -507,7 +553,13 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   const haste = d.haste
   fightT += dt
   if (mob.slow > 0) mob.slow -= dt
-  if (mob.dist > 0) {
+  if ((mob.root ?? 0) > 0) mob.root! -= dt
+  const feared = (mob.fear ?? 0) > 0 && styleOf(h) !== 'melee'
+  if ((mob.fear ?? 0) > 0) mob.fear! -= dt
+  const stunnedNow = mob.stun > 0
+  if (stunnedNow) mob.stun -= dt
+  if (feared) { mob.dist = Math.min(mob.dist + dt * 0.6, 6); mob.dist0 = Math.max(mob.dist0, mob.dist) } // ucieka
+  else if (mob.dist > 0 && !stunnedNow && !((mob.root ?? 0) > 0)) {
     mob.dist = Math.max(0, mob.dist - dt * (mob.slow > 0 ? 0.5 : 1))
     if (mob.dist <= 0) onContact(s, emit)
   }
@@ -520,7 +572,9 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
     dot.tickIn -= dt
     if (dot.tickIn <= 0) {
       const crit = (d.m.dotCrit ?? 0) > 0 && rng.chance(d.spellCrit)
+      ticking = true
       hitMob(s, d, dot.perTick * (crit ? 1.5 + (d.m.critDmg ?? 0) / 2 : 1), crit, emit, dot.school, dot.name)
+      ticking = false
       dot.tickIn += 3
     }
   }
@@ -555,12 +609,14 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   // białe ataki: melee (tylko w zwarciu) / łowca (strzela od razu); caster tylko bez many albo gdy nie ma czego rzucać
   const style = styleOf(h)
   const lowMana = d.res === 'mana' && h.res < d.maxRes * 0.12
-  const reach = style === 'ranged' || s.mob.dist <= 0
+  const wand = style === 'caster' && hasWand(h)
+  const reach = style === 'ranged' || wand || s.mob.dist <= 0
   if ((style !== 'caster' || lowMana || lastNoAction) && !h.casting && reach) {
     h.swing -= dt * haste
     if (h.swing <= 0) {
-      h.swing += swingSpeed(s, d)
-      whiteSwing(s, d, rng, emit, style === 'caster' ? 0.6 : 1)
+      h.swing += wand ? h.equip.ranged!.speed ?? 1.6 : swingSpeed(s, d)
+      if (wand) wandShot(s, d, rng, emit)
+      else whiteSwing(s, d, rng, emit, style === 'caster' ? 0.6 : 1)
       if (s.mob && s.mob.hp <= 0) return onKill(s, rng, emit)
     }
   }
@@ -579,7 +635,7 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
 
   // ataki mobów (grupa bije razem) — dopiero gdy dojdą do postaci
   if (!s.mob || !inMelee) { if (h.hp <= 0) onDeath(s, emit); return }
-  if (mob.stun > 0) mob.stun -= dt
+  if (stunnedNow || feared) { /* ogłuszony / w strachu: nie atakuje */ }
   else {
     mob.swing -= dt
     if (mob.swing <= 0) {
@@ -591,15 +647,19 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
       } else if ((d.m.immune ?? 0) > 0) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'absorb' })
       else {
         const roll = rng.next()
-        const dodge = Math.min(0.75, d.dodge)
-        const parry = PARRY.has(h.cls) && styleOf(h) !== 'caster' ? 0.05 : 0
-        if (roll < 0.05) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'miss' })
-        else if (roll < 0.05 + dodge) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'dodge' }); h.heroDodged = true }
-        else if (roll < 0.05 + dodge + parry) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'parry' }); h.heroDodged = true }
+        const up = Math.max(0, mob.lvl - h.level)
+        const dodge = Math.max(0, Math.min(0.75, d.dodge) - 0.01 * up)
+        const parry = PARRY.has(h.cls) && styleOf(h) !== 'caster' ? Math.max(0, 0.05 - 0.01 * up) : 0
+        const mmiss = Math.max(0, 0.05 - 0.01 * up)
+        if (roll < mmiss) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'miss' })
+        else if (roll < mmiss + dodge) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'dodge' }); h.heroDodged = true }
+        else if (roll < mmiss + dodge + parry) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'parry' }); h.heroDodged = true }
         else {
-          const up = Math.max(0, mob.lvl - h.level)
-          let dmg = mob.dmg * attackers * (attackers > 1 ? 0.75 : 1) * (1 + 0.12 * up + 0.02 * up * up) * (0.85 + rng.next() * 0.3) * (1 - d.dr(mob.lvl))
-          if (rng.chance(0.05)) dmg *= 1.5
+          let dmg = mob.dmg * attackers * (attackers > 1 ? 0.75 : 1) * (1 + 0.1 * up + 0.05 * up * up) * (0.85 + rng.next() * 0.3) * (1 - d.dr(mob.lvl))
+          const r2 = rng.next()
+          const crit = r2 < mobCritChance(up)
+          if (crit) dmg *= 2
+          else if (r2 < mobCritChance(up) + crushChance(up)) dmg *= 1.5
           if (h.shield > 0) {
             const ab = Math.min(h.shield, dmg)
             h.shield -= ab
@@ -608,7 +668,7 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
           }
           if (dmg > 0) {
             h.hp -= dmg
-            emit({ t: 'dmg', src: 'mob', amt: Math.round(dmg) })
+            emit({ t: 'dmg', src: 'mob', amt: Math.round(dmg), crit: crit || undefined })
             castHit(s, d, rng, emit)
             if (d.res === 'rage') h.res = Math.min(100, h.res + ((2.5 * dmg) / rageConv(h.level)) * (1 + (d.m.resGen ?? 0)))
           }
@@ -683,10 +743,22 @@ function weaponRoll(s: GameState, d: Derived, rng: Rng, emit: Emit, ranged: bool
   if ((roll -= tb.dodge) < 0) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'dodge', ability }); mob.dodged = true; return { mul: 0, crit: false, glance: false } }
   if ((roll -= tb.parry) < 0) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'parry', ability }); return { mul: 0, crit: false, glance: false } }
   if ((roll -= tb.glance) < 0) return { mul: tb.glanceMul, crit: false, glance: true }
-  const crit = rng.chance(d.crit + tb.crit + extraCrit)
+  const crit = rng.chance(d.crit + tb.crit + extraCrit - 0.01 * Math.max(0, mob.lvl - h.level))
   return { mul: 1, crit, glance: false }
 }
 
+// różdżka: strzał z dystansu za obrażenia różdżki (szkoła magii z przedmiotu, domyślnie arcane)
+function wandShot(s: GameState, d: Derived, rng: Rng, emit: Emit) {
+  const h = s.hero
+  const w = h.equip.ranged!
+  const mob = s.mob!
+  const up = Math.max(0, mob.lvl - h.level)
+  if (rng.chance(missChance(d, up, true))) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: 'Shoot', school: WAND_SCHOOL(w) }); return }
+  const crit = rng.chance(d.spellCrit)
+  const dmg = (w.dps ?? 3) * (w.speed ?? 1.6) * (0.85 + rng.next() * 0.3) * (crit ? 1.5 : 1) * (1 + (d.m.wand ?? 0))
+  hitMob(s, d, dmg, crit, emit, WAND_SCHOOL(w), 'Shoot')
+}
+const WAND_SCHOOL = (w: { name: string }): School => /fire|flame|burn|blaze|ember/i.test(w.name) ? 'fire' : /frost|ice|cold|snow/i.test(w.name) ? 'frost' : /shadow|dark|necro|skull|bone|death/i.test(w.name) ? 'shadow' : /holy|light|sacred|divine/i.test(w.name) ? 'holy' : /nature|thorn|leaf|bramble/i.test(w.name) ? 'nature' : 'arcane'
 function whiteSwing(s: GameState, d: Derived, rng: Rng, emit: Emit, mult: number) {
   const h = s.hero
   const mob = s.mob!
@@ -740,7 +812,7 @@ function hitMob(s: GameState, d: Derived, amt: number, crit: boolean, emit: Emit
   const a = Math.max(1, Math.round(amt * Math.max(0.4, 1 - 0.05 * up)))
   const before = aliveOf(mob)
   mob.hp -= a
-  emit({ t: 'dmg', src, amt: a, crit, school, ability, glance: glance || undefined })
+  emit({ t: 'dmg', src, amt: a, crit, school, ability, glance: glance || undefined, tick: ticking || undefined })
   if (school === 'shadow' && (d.m.lifesteal ?? 0) > 0) heal(s.hero, d, a * d.m.lifesteal, () => {})
   const after = mob.hp > 0 ? aliveOf(mob) : 0
   for (let i = after; i < before; i++) if (after > 0) emit({ t: 'subkill', mob: mob.name })
@@ -816,7 +888,7 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
     case 'hot': return !!h.hot
     case 'undead': return mob.type === 'undead'
     case 'stunned': return mob.stun > 0
-    case 'notStunned': return mob.stun <= 0
+    case 'notStunned': return mob.stun <= 0 && !((mob.root ?? 0) > 0) && !((mob.fear ?? 0) > 0)
     case 'noTemp': return !(h.temp[a.id] > 0)
     case 'lvl<10': return h.level < 10
     case 'lvl<20': return h.level < 20
@@ -869,6 +941,8 @@ function rotation(s: GameState, d: Derived): Ability | null {
     if (!engaged && isMelee(a) && !a.closes) continue // poza zasięgiem zwarcia
     // łowca w zwarciu nie strzela (martwa strefa jak w Classicu): tylko ciosy wręcz i pułapki
     if (h.cls === 'hunter' && engaged && !isMelee(a) && (a.kind === 'spell' || a.kind === 'dot' || a.kind === 'drain')) continue
+    // strzały wymagają łuku / strzelby / kuszy
+    if (h.cls === 'hunter' && !hasRanged(h) && NEEDS_RANGED.test(a.id)) continue
     if (a.closes && mob.dist <= 0) continue
     if (shadowform && a.school === 'holy' && a.kind !== 'heal' && a.kind !== 'shield' && a.kind !== 'hot') continue
     // styl walki hybrydy: w zwarciu (albo zawsze w stylu "Wręcz") bez czarów rzucanych dłużej niż natychmiast
@@ -938,7 +1012,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       hitMob(s, d, base * (a.power ?? 1) * (crit ? critMul(true) : 1) * mult * aoeN * (a.aoe ? 1 : sweepMul(s, d)), crit, emit, a.school, a.name)
       if (a.heal) heal(h, d, d.maxHp * a.heal, emit, a.name)
       if (a.cp) h.cp = Math.min(5, h.cp + a.cp)
-      if (a.stun && s.mob) s.mob.stun = Math.max(s.mob.stun, a.stun)
+      if (a.stun && s.mob) applyCC(s, a.id, a.stun)
       if (a.id === 'overpower' || a.id === 'mongoose_bite') mob.dodged = false
       maelstrom(h, d, rng)
       if (s.mob && s.mob.hp > 0) procs(s, d, rng, emit, 'hit')
@@ -953,7 +1027,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
     case 'finisher': {
       const cp = h.cp
       h.cp = 0
-      if (a.stun) { mob.stun = Math.max(mob.stun, a.stun * cp); return }
+      if (a.stun) { applyCC(s, a.id, a.stun * cp); return }
       if (a.buff) { h.temp[a.id] = (a.dur ?? 20) * (0.4 + cp * 0.12); return } // Expose Armor, Venom
       if (a.dur) {
         const total = (bp * 0.55 + d.ap * 0.12) * (a.power ?? 1) * cp * mult * (1 + (d.m.dot ?? 0))
@@ -986,7 +1060,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
         s.mob.dots = s.mob.dots.filter((x) => x.id !== a.id)
         s.mob.dots.push({ id: a.id, name: a.name, school: a.school ?? 'fire', perTick: total / ticks, left: a.dot.dur, tickIn: 3 })
       }
-      if (a.slow && s.mob) s.mob.slow = Math.max(s.mob.slow, a.slow)
+      if (a.slow && s.mob) { s.mob.slow = Math.max(s.mob.slow, a.slow); s.mob.by = { ...(s.mob.by ?? {}), slow: a.id } }
       // Lightning Overload (Forever): darmowa kopia błyskawicy za połowę obrażeń
       if ((a.id === 'lightning_bolt' || a.id === 'chain_lightning') && s.mob && s.mob.hp > 0 && rng.chance(d.m.overload ?? 0)) hitMob(s, d, dmg * 0.5, false, emit, a.school, `${a.name} (Overload)`)
       if (d.m.instant && a.cast) clearInstant(h)
@@ -1017,8 +1091,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       h.shield = a.shieldPct ? d.maxHp * a.shieldPct : spellValue(d, bp, a.power ?? 1, spCoef(a)) * (1 + (d.m.shield ?? 0))
       return
     case 'stun':
-      if (a.cc) { if (aliveOf(mob) >= 2) mob.cc = Math.max(mob.cc, a.dur ?? 6) }
-      else mob.stun = Math.max(mob.stun, a.dur ?? 2)
+      applyCC(s, a.id, a.dur ?? (a.cc ? 6 : 2))
       if (a.cp) h.cp = Math.min(5, h.cp + a.cp)
       return
     case 'cooldown':

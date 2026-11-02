@@ -64,7 +64,21 @@ export function resourceOf(h: Hero): Resource {
 }
 export function styleOf(h: Hero): 'melee' | 'ranged' | 'caster' {
   if (h.cls === 'druid' && (h.form === 'bear' || h.form === 'cat')) return 'melee'
-  return classById(h.cls).style
+  const st = classById(h.cls).style
+  if (st === 'ranged' && !hasRanged(h)) return 'melee' // łowca bez łuku/strzelby walczy wręcz
+  return st
+}
+// założona broń dystansowa (nie zepsuta)
+export function hasRanged(h: Hero, types?: string[]) {
+  const r = h.equip.ranged
+  return !!r && r.dur !== 0 && (!types || types.includes(r.weaponType ?? ''))
+}
+// różdżka maga / kapłana / czarnoksiężnika: białe strzały z dystansu
+export const hasWand = (h: Hero) => hasRanged(h, ['Wand'])
+// tryb walki z panelu umiejętności; łowca bez broni dystansowej zawsze walczy wręcz
+export function modeOf(h: Hero) {
+  if (h.cls === 'hunter' && !hasRanged(h)) return 'melee'
+  return h.mode
 }
 // pasywne buffy aktywne teraz: wytrenowane, niewyłączone, pasujące do formy (+ czasowe)
 export function activeBuffs(h: Hero, g = grants(h)): { a: Ability; fx: BuffFx; scale: number }[] {

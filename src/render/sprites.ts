@@ -219,7 +219,7 @@ export function drawWeapon(g: Grid, kind: WeaponKind, hx: number, hy: number, a:
       const n = kind === 'Greataxe' ? 17 : 12
       const [bx, by] = back(2), [tx, ty] = tip(n)
       g.line(bx, by, tx, ty, wood, 2)
-      const [ux, uy] = SKY(a + Math.PI / 2, 1)
+      const [ux, uy] = SKY(a - Math.PI / 2, 1) // ostrze po stronie uderzenia (do przodu / w dół), nie do postaci
       for (let i = 0; i < 5; i++) { const [cx, cy] = tip(n - 1 - i); g.line(cx, cy, cx + ux * (4 + (i === 2 ? 1 : 0)), cy + uy * (4 + (i === 2 ? 1 : 0)), i === 0 || i === 4 ? steelD : steel, 1) }
       break
     }

@@ -302,5 +302,6 @@ export function talentAbility(id: string): string | null {
 // Stany wroga i inne znaczniki (ogłuszenie, spowolnienie, obezwładnienie, elita, boss, Well Fed)
 export const STATE_ICONS: Record<string, string[]> = {
   stun: ['spell_frost_stun', 'ability_warstomp'], slow: ['spell_frost_frostshock', 'spell_frost_iceshock'], cc: ['spell_nature_polymorph', 'spell_frost_chainsofice'],
+  root: ['spell_nature_stranglevines'], freeze: ['spell_frost_frostnova'], fear: ['spell_shadow_possession', 'spell_shadow_psychicscream'],
   elite: ['inv_misc_head_dragon_01', 'ability_creature_cursed_02'], boss: ['inv_misc_head_dragon_black', 'achievement_boss_onyxia'], wellfed: ['spell_misc_food'], dot: ['ability_creature_poison_02'],
 }

@@ -152,6 +152,40 @@ Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classi
 - Suwaki głośności w Settings mieszczą się w oknie.
 - Kursor gry: w exe działa zawsze nad elementami gry (nie tylko, gdy okno ma fokus) i odświeża się po powrocie myszy z pulpitu (wcześniej np. nad torbami zostawał kursor systemowy).
 
+### Nowe w 0.9.7
+- Buffy i debuffy na mobach są nad imieniem, a nie na nim.
+
+### Nowe w 0.9.8
+- **Kontrola tłumu działa i ją widać.** Każda umiejętność ma swój efekt:
+  - ogłuszenie: wróg nie atakuje i nie podchodzi;
+  - unieruchomienie (Entangling Roots, Frost Nova): wróg nie podchodzi, a postać dystansowa odskakuje ze zwarcia;
+  - strach: wróg ucieka i nie atakuje;
+  - spowolnienie (Concussive Shot, Wing Clip, Piercing Howl);
+  - obezwładnienie jednego z grupy (Polymorph, Freezing Trap, Blind). Na pojedynczym wrogu działa krótko, jak ogłuszenie.
+  - Na wrogu widać efekt w pikselach: gwiazdki, korzenie, lód, owcę, „Zzz”, czaszkę strachu, kurz oślepienia. W tooltipie jest nazwa umiejętności.
+  - Ogłuszony wróg nie podchodzi. Wcześniej ogłuszenie z dystansu nie upływało.
+- **Nowe efekty czarów i ataków** (`src/render/vfx.ts`):
+  - kula ognia, lodowy grot, cień, pociski arkanów;
+  - strzały, kule z broni palnej, bronie miotane;
+  - błyskawice, promienie z nieba (Smite, Moonfire, Starfire);
+  - czary obszarowe, cięcia bronią, iskry trafień, leczenie, buffy i iskry w dłoni przy rzucaniu.
+  - Liczba obrażeń pojawia się w chwili trafienia pocisku.
+- **Duch po śmierci:** po animacji śmierci zwłoki zostają, a półprzezroczysty duch biegnie z powrotem. Pod koniec drogi ciało pojawia się z prawej strony.
+- **Różnica poziomów jak w Classicu:**
+  - wyższy wróg częściej trafia krytycznie (×2);
+  - od +3 poziomów zadaje miażdżące ciosy (×1,5);
+  - rzadziej pudłuje, a postać rzadziej unika i paruje;
+  - trafienie czarem: 96/95/94% na +0..+2, potem 83/72/61% na +3..+5;
+  - obrażenia wroga rosną szybciej z różnicą poziomów.
+  - Skutek dla druida na poziomie 15: na +5 pojedynczy wróg to bliska walka, a grupa praktycznie zawsze wygrywa. Od +6 farmienie jest niemożliwe. Test: `npx tsx scripts/overlevel.ts nightelf/druid 15`.
+- **Łowca bez broni dystansowej walczy wręcz**, niezależnie od stylu w umiejętnościach, i nie używa strzał. Mag, kapłan i czarnoksiężnik z różdżką strzelają nią z dystansu (Shoot).
+- **Topory** mają ostrze skierowane do przodu, w stronę wroga.
+- **Kupiec:** większe odstępy między przyciskami, także w zakładkach i innych oknach. Sprzedaż prawym kliknięciem działa tylko przy otwartej zakładce Vendor, więc w mieście można spokojnie zmieniać ekwipunek. W stolicy okno otwiera się na zakładce trenera.
+- Założenie przedmiotu z torby otwiera okno postaci.
+- **Okna nie zmniejszają się**, gdy otwartych jest kilka. Zachowują rozmiar i w razie braku miejsca nachodzą na siebie. Na wierzchu jest ostatnio kliknięte albo otwarte.
+- **Deeprun Tram ma własną scenę:** tunel z łukami i lampami, okna na głębię z rybami, bąbelkami i cieniem lewiatana, tory z podkładami, otwarte wagoniki z iskrami spod kół.
+- Szerokość paska nie ma wpływu na walkę. Czas podchodzenia wroga liczy się w sekundach w symulacji, a szerokość paska zmienia tylko to, jak daleko na ekranie widać wroga.
+
 ## Struktura
 
 ```
@@ -160,7 +194,7 @@ src/game/      czysta logika (bez DOM): sim.ts, world.ts, quests.ts, town.ts, in
 src/render/    scene.ts (scena + miasta), icons.ts (ikony przedmiotów i umiejętności)
 src/ui/        React: tworzenie postaci, pasek, panele, mapa, dnd.tsx (przeciąganie), itemActions.ts
 electron/      main.cjs (okno-nakładka, tray, autostart), preload.cjs
-scripts/       balance.ts
+scripts/       balance.ts, overlevel.ts (walka w strefach wyższych o kilka poziomów)
 ```
 
 Najważniejsza zasada: `src/game` nie wie nic o DOM-ie. Funkcja `advance(state, sekundy)` napędza grę na żywo, progres offline i test balansu.

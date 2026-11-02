@@ -9,6 +9,7 @@ import { abilityIcon, racialIcon, stateIcon } from './icons'
 import { heroSprite, formSprite, LOOKS, type Anim, type CAnim, type FormAnim, type FormKind, type HeroKey, type OffKind, type WeaponKind, type Sprite } from './sprites'
 import { mobSprite, npcSprite, petSprite, totemSprite, type NpcRole } from './mobsprites'
 import type { RaceId } from '../data/races'
+import { Vfx, spellLook, PAL, type ProjKind } from './vfx'
 import { drawBackdrop, drawForeground, drawTown, drawSea, shipSprite, zeppelinSprite, type BackOpts } from './backdrop'
 
 // obrazki ikon (data URL) do rysowania na canvasie
@@ -23,8 +24,7 @@ import { townOf } from '../game/world'
 import type { GameEvent, GameState } from '../game/types'
 import { RARITY_COLOR } from '../game/types'
 
-type Float = { x: number; y: number; vy: number; text: string; color: string; life: number; max: number; size: number }
-type Proj = { x: number; y: number; tx: number; color: string; life: number }
+type Float = { x: number; y: number; vy: number; text: string; color: string; life: number; max: number; size: number; delay?: number }
 type Corpse = { name: string; type: MobType; color: string; x: number; life: number; count: number; scale: number }
 type Fx = { kind: 'levelup' | 'heal' | 'racial' | 'death' | 'nova'; life: number; text?: string; x?: number }
 
@@ -48,7 +48,7 @@ export class Scene {
   scroll = 0
   t = 0
   floats: Float[] = []
-  projs: Proj[] = []
+  vfx = new Vfx(() => this.ctx)
   corpses: Corpse[] = []
   fx: Fx[] = []
   mobX = 0
@@ -87,36 +87,64 @@ export class Scene {
     const hx = this.heroX
     const mx = this.mobX
     const top = this.groundY - 20 * this.px
-    const add = (x: number, text: string, color: string, size = 12) => this.floats.push({ x: x + (Math.random() * 16 - 8), y: top, vy: -18, text, color, life: 1.4, max: 1.4, size })
+    const add = (x: number, text: string, color: string, size = 12, delay = 0) => this.floats.push({ x: x + (Math.random() * 16 - 8), y: top, vy: -18, text, color, life: 1.4, max: 1.4, size, delay })
+    const gy = this.groundY, sc = this.sc
+    const hand = { x: hx + 9 * sc, y: gy - 13 * sc }
+    const mobC = { x: mx - 2 * sc, y: gy - 11 * sc }
     switch (e.t) {
       case 'dmg':
         if (e.src === 'mob') {
           this.mobAtkT = 0.42
           if (e.miss) add(hx, e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : e.miss === 'absorb' ? 'Absorb' : 'Miss', '#ffffff', 10)
-          else { add(hx, `-${e.amt}`, '#ff4040', 12); this.hurtT = 0.24 }
+          else { add(hx, `-${e.amt}${e.crit ? '!' : ''}`, '#ff4040', e.crit ? 15 : 12); this.hurtT = 0.24; this.vfx.hit({ kind: 'claw', school: 'physical', x: hx + 5 * sc, y: gy - 14 * sc, gy, life: 0.3, crit: !!e.crit }) }
         } else {
-          if (e.src === 'hero' && (!e.school || e.school === 'physical') && this.atkT <= 0.1 && !s.mob?.dots.some((d) => d.name === e.ability)) this.atkT = 0.45
-          if (e.miss) add(mx, `${e.ability ? `${e.ability}: ` : ''}${e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : 'Miss'}`, '#dddddd', 11)
+          const school = e.school ?? 'physical'
+          const phys = school === 'physical'
+          const missTxt = `${e.ability ? `${e.ability}: ` : ''}${e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : 'Miss'}`
+          const num = () => `${e.amt}${e.glance ? ' (glancing)' : ''}`
+          const col = e.src === 'pet' ? '#ffd28a' : !phys ? SCHOOL_COLOR[school] : '#ffff66'
+          // jak pokazać trafienie: pocisk / strzała / promień / błyskawica / cięcie
+          let delay = 0
+          if (e.src === 'pet') {
+            if (!e.miss) this.vfx.hit({ kind: 'spark', school, x: mobC.x, y: mobC.y, gy, life: 0.25, crit: !!e.crit })
+          } else if (e.tick) {
+            if (!e.miss) this.vfx.hit({ kind: 'tick', school, x: mobC.x, y: mobC.y, gy, life: 0.6, crit: !!e.crit })
+          } else {
+            const shooter = this.shotKind(s, e.ability)
+            if (shooter) {
+              if (shooter !== 'wand' && this.atkT <= 0.1) this.atkT = 0.45
+              else if (shooter === 'wand') this.castGlow = 0.3
+              delay = this.shoot(shooter, school, hand, mobC, !!e.crit, !e.miss)
+            } else if (phys) {
+              if (this.atkT <= 0.1) this.atkT = 0.45
+              this.vfx.hit({ kind: 'slash', school, x: mobC.x - 2 * sc, y: gy - 16 * sc, gy, life: 0.24, crit: !!e.crit })
+              if (!e.miss && e.crit) this.vfx.hit({ kind: 'burst', school, x: mobC.x, y: mobC.y, gy, life: 0.3, crit: true })
+            } else {
+              const look = spellLook(e.ability, school)
+              if (look.proj) delay = this.shoot(look.proj, school, hand, mobC, !!e.crit, !e.miss)
+              else if (look.hit === 'bolt') { this.vfx.hit({ kind: 'bolt', school, x: mobC.x, y: mobC.y, x0: hand.x, y0: hand.y, gy, life: 0.28, crit: !!e.crit }); if (!e.miss) this.vfx.hit({ kind: 'burst', school: 'frost', x: mobC.x, y: mobC.y, gy, life: 0.35, crit: !!e.crit }) }
+              else if (look.hit === 'aoe') this.vfx.hit({ kind: 'aoe', school, x: mx + ((this.lastAlive - 1) * this.groupGap) / 2, y: mobC.y, gy, life: 0.7, crit: !!e.crit, w: 30 * sc + (this.lastAlive - 1) * this.groupGap })
+              else if (look.hit) this.vfx.hit({ kind: look.hit, school, x: mobC.x, y: mobC.y, gy, life: look.hit === 'beam' ? 0.5 : 0.4, crit: !!e.crit })
+            }
+          }
+          if (e.miss) add(mx, missTxt, '#dddddd', 11, delay)
           else {
-            add(mx, `${e.amt}${e.glance ? ' (glancing)' : ''}`, e.src === 'pet' ? '#ffd28a' : e.school && e.school !== 'physical' ? SCHOOL_COLOR[e.school] : '#ffff66', e.crit ? 17 : 12)
-            this.mobFlash = 0.15
-            this.mobHurtT = 0.2
-            if (e.src === 'hero' && (!e.school || e.school === 'physical')) this.heroLunge = 0.18
+            add(mx, num(), col, e.crit ? 17 : 12, delay)
+            const hitNow = () => { this.mobFlash = 0.15; this.mobHurtT = 0.2 }
+            if (delay > 0) setTimeout(hitNow, delay * 1000); else hitNow()
+            if (e.src === 'hero' && phys && !this.shotKind(s, e.ability)) this.heroLunge = 0.18
             if (e.src === 'pet') this.petAtkT = 0.42
           }
         }
         break
       case 'heal':
         add(hx, `+${e.amt}`, '#40ff60', 12)
-        this.fx.push({ kind: 'heal', life: 0.8 })
+        this.vfx.hit({ kind: 'heal', school: 'nature', x: hx, y: gy - 12 * sc, gy, life: 0.9, crit: false })
         break
       case 'cast':
-        if (e.kind === 'spell' || e.kind === 'dot') {
-          const st = styleOf(s.hero)
-          if (e.school && e.school !== 'physical' || st === 'ranged') this.projs.push({ x: hx + 8, y: this.groundY - 14 * this.px, tx: mx, color: SCHOOL_COLOR[e.school ?? 'physical'], life: 1 })
-        }
         this.castGlow = 0.4
         this.castColor = SCHOOL_COLOR[e.school ?? 'physical']
+        if (e.kind === 'buff' || e.kind === 'shield' || e.kind === 'cooldown' || e.kind === 'regen') this.vfx.hit({ kind: 'buff', school: e.school && e.school !== 'physical' ? e.school : 'holy', x: hx, y: gy, gy, life: 0.8, crit: false })
         if (e.ability === 'Fire Nova') {
           const ft = this.totemVis.find((v) => v.el === 'fire' && !v.gone)
           this.fx.push({ kind: 'nova', life: 0.7, x: ft ? ft.x + 2 * (this.px / 2) : this.heroX })
@@ -175,17 +203,21 @@ export class Scene {
     const zone = currentZone(s)
     // postać walcząca wręcz biegnie do nadchodzącego wroga
     const charging = s.phase === 'fight' && !!s.mob && s.mob.dist > 0 && s.mob.dist0 < 2
-    const moving = s.phase === 'walk' || s.phase === 'travel' || charging || (s.phase === 'dead' && s.phaseT > 3)
+    const moving = s.phase === 'walk' || s.phase === 'travel' || charging || (s.phase === 'dead' && this.deathT > 2 && s.phaseT > 0.6)
     if (moving) this.scroll += dt * (s.phase === 'travel' ? 70 : 42) * (s.phase === 'dead' ? 1.5 : 1)
 
     // tło: pikselowe niebo, wzgórza, rekwizyty biomu i ziemia (render/backdrop.ts)
     const gy = this.groundY
     const bo: BackOpts = { w, h, sc: this.sc, scroll: this.scroll, t: this.t, biome: zone.biome, gy, town: s.where !== 'field' }
-    if (!(s.phase === 'travel' && s.trip && (s.trip.kind === 'ship' || s.trip.kind === 'zeppelin'))) drawBackdrop(ctx, bo)
+    if (!(s.phase === 'travel' && s.trip && (s.trip.kind === 'ship' || s.trip.kind === 'zeppelin' || s.trip.kind === 'tram'))) drawBackdrop(ctx, bo)
 
     if (s.where !== 'field') {
       this.town(s, gy, dt)
       drawForeground(ctx, bo)
+      return
+    }
+    if (s.phase === 'travel' && s.trip && s.trip.kind === 'tram') {
+      this.tram(s, dt)
       return
     }
     if (s.phase === 'travel' && s.trip && (s.trip.kind === 'ship' || s.trip.kind === 'zeppelin')) {
@@ -216,13 +248,17 @@ export class Scene {
       const start = this.w + 30
       const k = s.mob.dist0 > 0 ? Math.max(0, Math.min(1, s.mob.dist / s.mob.dist0)) : 0
       const want = target + (start - target) * k
-      const approaching = this.mobX > want + 0.5 || s.mob.dist > 0
+      const m = s.mob
+      const rooted = (m.root ?? 0) > 0, feared = (m.fear ?? 0) > 0 && m.stun <= 0
+      const fleeing = feared && want > this.mobX + 0.01
+      const approaching = !rooted && m.stun <= 0 && !feared && (this.mobX > want + 0.5 || m.dist > 0)
       this.mobX = this.mobX > want ? Math.max(want, this.mobX - dt * 900) : want
       const boss = s.mob.boss
       const bscale = boss === 'zone' ? 1.7 : boss === 'mini' ? 1.4 : 1
-      const stunned = s.mob.stun > 0
+      const stunned = s.mob.stun > 0 || (rooted && m.rootl === 'ice')
       let anim: CAnim = 'idle', f = Math.floor(this.mobAnimT * 5) % 4
       if (stunned) f = 0
+      else if (fleeing) { anim = 'walk'; f = Math.floor(this.mobAnimT * 14) % 8 }
       else if (this.mobHurtT > 0) { anim = 'hurt'; f = Math.min(3, Math.floor((0.2 - this.mobHurtT) / 0.05)) }
       else if (this.mobAtkT > 0) { anim = 'attack'; f = Math.min(5, Math.floor((0.42 - this.mobAtkT) / 0.07)) }
       else if (approaching) { anim = 'walk'; f = Math.floor(this.mobAnimT * 12) % 8 }
@@ -233,9 +269,15 @@ export class Scene {
       this.lastMobState = { name: s.mob.name, type: s.mob.type, color: s.mob.color, count: s.mob.count, scale: bscale }
       // dalsi z grupy (ciemniejsi), za głównym
       for (let i = alive - 1; i >= 1; i--) {
-        const sp = mobSprite(s.mob.name, s.mob.type, s.mob.color, approaching ? 'walk' : 'idle', (f + i * 3) % (approaching ? 8 : 4), 0.12 * i)
-        this.shadow(this.mobX + i * this.groupGap, gy, ((sp.right - sp.left) / 2.4) * this.sc * scale)
-        this.blitS(sp, this.mobX + i * this.groupGap, gy, scale)
+        const gx = this.mobX + i * this.groupGap
+        const held = m.cc > 0 && i === alive - 1 // ostatni z grupy obezwładniony (Polymorph, Freezing Trap, Blind)
+        if (held && m.ccl === 'poly') { this.shadow(gx, gy, 5 * this.sc * scale); this.sheep(gx, gy, Math.max(1, Math.round(this.sc * this.dpr * scale)) / this.dpr); continue }
+        const mv = approaching && !held
+        const sp = mobSprite(s.mob.name, s.mob.type, s.mob.color, mv ? 'walk' : 'idle', held || stunned ? 0 : (f + i * 3) % (mv ? 8 : 4), 0.12 * i)
+        this.shadow(gx, gy, ((sp.right - sp.left) / 2.4) * this.sc * scale)
+        const rr = this.blitFlip(sp, gx, gy, scale, fleeing)
+        if (held) this.ccFx(m.ccl === 'ice' ? 'iceblock' : 'blind', rr, gy)
+        else this.mobCC(m, rr, gy, true)
       }
       if (boss) {
         const ag = ctx.createRadialGradient(this.mobX, gy - 14 * p * bscale / 2, 2, this.mobX, gy - 14 * p * bscale / 2, 30 * bscale * (p / 2))
@@ -248,12 +290,12 @@ export class Scene {
       else this.shadow(this.mobX, gy, 6 * this.sc * scale)
       ctx.save()
       if (this.mobFlash > 0) ctx.filter = 'brightness(1.8)'
-      const r = this.blitS(main, this.mobX, gy, scale)
+      const r = this.blitFlip(main, this.mobX, gy, scale, fleeing)
       ctx.restore()
-      if (stunned) { ctx.fillStyle = '#ffe680'; for (let i = 0; i < 3; i++) ctx.fillRect(Math.round(this.mobX - 6 + Math.cos(this.t * 6 + i * 2) * 8), Math.round(r.top - 4 + Math.sin(this.t * 6 + i * 2) * 3), 2 * this.sc, 2 * this.sc) }
+      this.mobCC(m, r, gy, false)
       // tabliczka z imieniem i pasek HP moba (jak nameplate) nad głową
       const bw = boss ? 70 : 44
-      const by = Math.max(boss ? 40 : 36, Math.round(r.top - 8))
+      const by = Math.max(boss ? 38 : 36, Math.round(r.top - 8))
       ctx.fillStyle = 'rgba(0,0,0,.7)'
       ctx.fillRect(this.mobX - bw / 2 - 1, by - 1, bw + 2, 6)
       ctx.fillStyle = s.mob.lvl > s.hero.level + 2 ? '#d01c1c' : s.mob.lvl >= s.hero.level - 2 ? '#d8b018' : '#3cb83c'
@@ -265,7 +307,7 @@ export class Scene {
         const col = s.mob.lvl > s.hero.level + 2 ? '#ff5050' : s.mob.lvl >= s.hero.level - 2 ? '#ffe060' : '#60e060'
         this.text(`${s.mob.name} (${s.mob.lvl})${s.mob.count > 1 ? ` ×${aliveOfMob(s.mob)}` : ''}`, this.mobX, by - 4, col, 10, true)
       }
-      this.mobDebuffs(s, by - 24)
+      this.mobDebuffs(s, by - (boss ? 33 : 31))
       this.mobBox = { x0: Math.min(r.left, this.mobX - bw / 2) - 4, y0: by - 16, x1: Math.max(r.right, this.mobX + bw / 2) + (alive - 1) * this.groupGap + 4, y1: gy + 4 }
     }
 
@@ -294,17 +336,8 @@ export class Scene {
     // bohater
     this.hero(s, gy, moving, dt)
 
-    // pociski
-    for (const pr of this.projs) {
-      pr.x += dt * 420
-      pr.life -= dt
-      ctx.fillStyle = pr.color
-      ctx.shadowColor = pr.color
-      ctx.shadowBlur = 8
-      ctx.fillRect(pr.x, pr.y, 6, 4)
-      ctx.shadowBlur = 0
-    }
-    this.projs = this.projs.filter((pr) => pr.life > 0 && pr.x < pr.tx)
+    // pociski, trafienia, cięcia, promienie
+    this.vfx.update(dt, this.sc)
 
     // efekty
     for (const f of this.fx) {
@@ -332,11 +365,6 @@ export class Scene {
         ctx.fillStyle = 'rgba(255,140,40,.25)'; ctx.fill()
         ctx.shadowBlur = 0
         ctx.globalAlpha = 1
-      } else if (f.kind === 'heal') {
-        ctx.globalAlpha = f.life
-        ctx.fillStyle = '#7dff6a'
-        for (let i = 0; i < 6; i++) ctx.fillRect(this.heroX - 10 + hash(i) * 20, gy - (1 - f.life) * 40 - hash(i + 9) * 30, 2, 2)
-        ctx.globalAlpha = 1
       }
     }
     this.fx = this.fx.filter((f) => f.life > 0)
@@ -345,6 +373,7 @@ export class Scene {
 
     // latające liczby
     for (const f of this.floats) {
+      if (f.delay && f.delay > 0) { f.delay -= dt; continue }
       f.life -= dt
       f.y += f.vy * dt
       ctx.globalAlpha = Math.max(0, Math.min(1, f.life / 0.4))
@@ -444,6 +473,123 @@ export class Scene {
   }
 
 
+  // Deeprun Tram: gnomi tunel pod wodą — kamienne łuki z lampami, szklane okna na głębię (ryby, bąbelki),
+  // tory z podkładami i otwarty wagonik z mosiężnymi słupkami, w którym stoi postać.
+  tramScroll = 0
+  tram(s: GameState, dt: number) {
+    const c = this.ctx
+    const { w, h } = this
+    const u = Math.max(1, Math.round(this.sc * this.dpr)) / this.dpr
+    this.tramScroll += dt * 210
+    const sc = this.tramScroll
+    const gy = this.groundY
+    const R = (x: number, y: number, ww: number, hh: number, col: string) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), Math.ceil(ww), Math.ceil(hh)) }
+    const hsh = (n: number) => { const x = Math.sin(n * 91.7 + 13.1) * 43758.5453; return x - Math.floor(x) }
+    c.save()
+    c.imageSmoothingEnabled = false
+    // ściana tunelu: cegły z przesunięciem (paralaksa wolniej niż tory)
+    R(0, 0, w, h, '#1c1a22')
+    const bh = 5 * u, bw = 14 * u
+    const wallOff = (sc * 0.75) % (bw * 2)
+    for (let y = 0, row = 0; y < gy; y += bh, row++) {
+      const o = (row % 2 ? bw / 2 : 0) - wallOff
+      for (let x = o - bw * 2; x < w + bw; x += bw) {
+        const id = Math.floor((x + sc * 0.75) / bw) * 31 + row
+        R(x + u, y + u, bw - u, bh - u, hsh(id) > 0.5 ? '#2c2a33' : '#26242d')
+      }
+    }
+    // segmenty: co P pikseli filar z łukiem i lampą; pomiędzy co drugim — wielkie okno na wodę
+    const P = 150 * u
+    const segOff = (sc * 0.75) % P
+    const segBase = Math.floor((sc * 0.75) / P)
+    const wy0 = Math.round(h * 0.1), wy1 = Math.round(gy - 18 * u)
+    for (let i = -1; i <= Math.ceil(w / P) + 1; i++) {
+      const x0 = i * P - segOff
+      const seg = segBase + i
+      if (seg % 3 !== 0) {
+        // okno: głęboka woda z promieniami światła, rybami i bąbelkami
+        const wx0 = x0 + 14 * u, wx1 = x0 + P - 8 * u
+        const gr = c.createLinearGradient(0, wy0, 0, wy1)
+        gr.addColorStop(0, '#1a5a8a'); gr.addColorStop(1, '#061a30')
+        c.fillStyle = gr; c.fillRect(Math.round(wx0), wy0, Math.round(wx1 - wx0), wy1 - wy0)
+        c.save(); c.beginPath(); c.rect(wx0, wy0, wx1 - wx0, wy1 - wy0); c.clip()
+        c.globalAlpha = 0.12
+        for (let k = 0; k < 3; k++) { c.fillStyle = '#bfe8ff'; const rx = wx0 + ((seg * 37 + k * 50) % 100) / 100 * (wx1 - wx0); c.beginPath(); c.moveTo(rx, wy0); c.lineTo(rx + 10 * u, wy0); c.lineTo(rx - 14 * u, wy1); c.lineTo(rx - 22 * u, wy1); c.fill() }
+        c.globalAlpha = 1
+        // ryby płyną powoli w lewo (dalszy plan: wolniejsza paralaksa)
+        for (let k = 0; k < 2; k++) {
+          const fy = wy0 + (0.25 + hsh(seg * 7 + k) * 0.5) * (wy1 - wy0)
+          const fx = wx1 - ((this.t * (14 + k * 9) + hsh(seg + k * 3) * 200) * u) % (wx1 - wx0 + 30 * u)
+          const fc = k ? '#2a4a6a' : '#3a6a8a'
+          R(fx, fy, 6 * u, 3 * u, fc); R(fx + 6 * u, fy - u, 2 * u, 5 * u, fc); R(fx + u, fy + u, u, u, '#8ac0e0')
+        }
+        if (seg % 7 === 2) { // wielki cień (rekin / leviathan) w oddali
+          const fx = wx1 - ((this.t * 6) * u) % (wx1 - wx0 + 60 * u), fy = wy0 + (wy1 - wy0) * 0.45
+          c.globalAlpha = 0.35; R(fx, fy, 26 * u, 6 * u, '#04101c'); R(fx + 26 * u, fy - 3 * u, 5 * u, 12 * u, '#04101c'); R(fx + 10 * u, fy - 4 * u, 4 * u, 4 * u, '#04101c'); c.globalAlpha = 1
+        }
+        for (let k = 0; k < 6; k++) {
+          const bx = wx0 + hsh(seg * 13 + k) * (wx1 - wx0)
+          const by = wy1 - ((this.t * (10 + k * 3) * u + hsh(k + seg) * (wy1 - wy0)) % (wy1 - wy0))
+          R(bx + Math.sin(this.t * 3 + k) * u, by, u, u, 'rgba(200,235,255,.7)')
+        }
+        c.restore()
+        // mosiężna rama okna z nitami
+        R(wx0 - u, wy0 - 2 * u, wx1 - wx0 + 2 * u, 2 * u, '#9a7a3a'); R(wx0 - u, wy1, wx1 - wx0 + 2 * u, 2 * u, '#6a5228')
+        for (let x = wx0 + 4 * u; x < wx1; x += 24 * u) { R(x, wy0, 2 * u, wy1 - wy0, 'rgba(154,122,58,.85)'); R(x, wy0 - u, 2 * u, u, '#e0c070') }
+      }
+      // filar z łukiem
+      R(x0, 0, 10 * u, gy, '#3a3640'); R(x0 + 2 * u, 0, 2 * u, gy, '#4a4652'); R(x0 + 8 * u, 0, 2 * u, gy, '#2a2630')
+      // lampa na filarze: żółte światło z poświatą
+      const ly = Math.round(h * 0.32)
+      const gl = c.createRadialGradient(x0 + 5 * u, ly, 1, x0 + 5 * u, ly, 26 * u)
+      gl.addColorStop(0, 'rgba(255,210,120,.45)'); gl.addColorStop(1, 'rgba(255,200,100,0)')
+      c.fillStyle = gl; c.fillRect(x0 - 26 * u, ly - 26 * u, 62 * u, 52 * u)
+      R(x0 + 3 * u, ly - 3 * u, 4 * u, 5 * u, '#2a2018'); R(x0 + 4 * u, ly - 2 * u, 2 * u, 3 * u, Math.sin(this.t * 13 + seg) > -0.9 ? '#ffe080' : '#c09040')
+    }
+    // podłoże: tłuczeń, podkłady i szyny (najszybciej)
+    R(0, gy - 3 * u, w, h - gy + 3 * u, '#14121a')
+    const slp = 10 * u, so = sc % slp
+    for (let x = -so; x < w; x += slp) R(x, gy - 2 * u, 5 * u, 3 * u, '#3a2a1c')
+    R(0, gy - 3 * u, w, u, '#9a9aa8'); R(0, gy - 2 * u, w, u, '#5a5a66')
+    // wagoniki: dwa otwarte wagony połączone sprzęgiem
+    const cx = Math.round(w * 0.42)
+    const joint = Math.floor(sc / (60 * u)) !== Math.floor((sc - dt * 210) / (60 * u)) // stuk na złączu szyn
+    this.tramBump = joint ? 1 : Math.max(0, this.tramBump - dt * 8)
+    const bump = Math.round(this.tramBump) * u
+    const car = (x: number, len: number, front: boolean) => {
+      const top = gy - 9 * u - bump
+      // koła z obracającymi się szprychami
+      for (const wx of [x - len / 2 + 7 * u, x + len / 2 - 7 * u]) {
+        R(wx - 3 * u, gy - 7 * u, 6 * u, 6 * u, '#2a2a30'); R(wx - 2 * u, gy - 6 * u, 4 * u, 4 * u, '#6a6a74')
+        const sp = Math.floor(sc / (3 * u)) % 2
+        R(wx - (sp ? 2 : 0) * u, gy - (sp ? 4 : 6) * u, sp ? 4 * u : u, sp ? u : 4 * u, '#2a2a30')
+      }
+      // platforma, burta, słupki i dach
+      R(x - len / 2, top, len, 3 * u, '#b08a3a'); R(x - len / 2, top + 2 * u, len, 2 * u, '#6a5020')
+      for (let rx = x - len / 2 + 2 * u; rx < x + len / 2; rx += 8 * u) R(rx, top + u, u, u, '#f0d080')
+      const roofY = top - 34 * u
+      for (const px of [x - len / 2 + u, x, x + len / 2 - 3 * u]) R(px, roofY, 2 * u, 34 * u, '#8a6a2a')
+      R(x - len / 2 - 2 * u, roofY - 3 * u, len + 4 * u, 3 * u, '#5a6a7a'); R(x - len / 2 - 2 * u, roofY - 4 * u, len + 4 * u, u, '#8a9aaa')
+      R(x - len / 2, top - 10 * u, len, u, '#c0a050') // poręcz
+      if (front) { R(x + len / 2, top - 6 * u, 3 * u, 8 * u, '#3a4048'); R(x + len / 2 + u, top - 4 * u, 2 * u, 2 * u, Math.sin(this.t * 6) > 0 ? '#ffe080' : '#ffb040') }
+      return top
+    }
+    const len = 64 * u
+    car(cx - len - 6 * u, len, false)
+    R(cx - len / 2 - 7 * u, gy - 7 * u - bump, 8 * u, 2 * u, '#3a3a40') // sprzęg
+    const top = car(cx, len, true)
+    // iskry spod kół
+    if (Math.sin(this.t * 17) > 0.7) for (let i = 0; i < 3; i++) R(cx + len / 2 - 7 * u - i * 3 * u - hsh(this.t + i) * 6 * u, gy - 2 * u - hsh(this.t * 3 + i) * 3 * u, u, u, i ? '#ffd060' : '#ffffff')
+    c.restore()
+    // postać stoi w wagonie (z kołysaniem)
+    c.save(); c.translate(cx - this.heroX - 8 * u, -(this.groundY - top)); this.hero(s, this.groundY, false, dt); c.restore()
+    // przednia poręcz przed postacią
+    R(cx - len / 2, top - 10 * u, len, u, '#c0a050')
+    this.text(s.trip!.label, w * 0.78, 18, '#ffd100', 13, true)
+    this.text(`${Math.ceil(s.phaseT)} s to arrival`, w * 0.78, 34, '#ffffff', 11, true)
+  }
+  tramBump = 0
+
   shadow(x: number, gy: number, rx: number) {
     const c = this.ctx
     c.fillStyle = 'rgba(0,0,0,.28)'
@@ -496,9 +642,17 @@ export class Scene {
       list.push({ icon: a ? abilityIcon(a, h.cls) : stateIcon('dot', 'cannibalize'), name: d.name, desc: `${Math.round(d.perTick)} ${d.school === 'physical' ? 'Physical' : d.school[0].toUpperCase() + d.school.slice(1)} damage every 3 s.`, left: d.left, kind: 'debuff' })
     }
     for (const a of c.abilities) if (a.debuff && active(h, a, g)) list.push({ icon: abilityIcon(a, h.cls), name: a.name, desc: a.desc, kind: 'debuff' })
-    if (mob.stun > 0) list.push({ icon: stateIcon('stun', 'warstomp'), name: 'Stunned', desc: 'Cannot attack or move.', left: mob.stun, kind: 'debuff' })
-    if (mob.slow > 0) list.push({ icon: stateIcon('slow', 'slow'), name: 'Slowed', desc: 'Movement speed reduced: takes longer to reach you.', left: mob.slow, kind: 'debuff' })
-    if (mob.cc > 0) list.push({ icon: stateIcon('cc', 'escape'), name: 'Incapacitated', desc: 'One enemy of the group is out of the fight.', left: mob.cc, kind: 'debuff' })
+    const by = (k: string) => { const id = mob.by?.[k]; return id ? c.abilities.find((x) => x.id === id) : undefined }
+    const ccA = (k: string, st: string, fb: string, name: string, desc: string, left: number) => {
+      const a = by(k)
+      list.push({ icon: a ? abilityIcon(a, h.cls) : stateIcon(st, fb), name: a ? `${a.name} — ${name}` : name, desc, left, kind: 'debuff' })
+    }
+    const LOOKN: Record<string, string> = { stun: 'Stunned', sleep: 'Asleep', daze: 'Disoriented', silence: 'Silenced', fear: 'Feared' }
+    if (mob.stun > 0) ccA('stun', 'stun', 'warstomp', LOOKN[mob.cct ?? 'stun'] ?? 'Stunned', 'Cannot attack or move.', mob.stun)
+    if ((mob.root ?? 0) > 0) ccA('root', mob.rootl === 'ice' ? 'freeze' : 'root', 'slow', mob.rootl === 'ice' ? 'Frozen' : 'Rooted', 'Cannot move: it will not reach you (but still hits in melee).', mob.root!)
+    if ((mob.fear ?? 0) > 0 && mob.stun <= 0) ccA('fear', 'fear', 'escape', 'Feared', 'Runs away in terror and cannot attack.', mob.fear!)
+    if (mob.slow > 0) ccA('slow', 'slow', 'slow', 'Slowed', 'Movement speed reduced: takes longer to reach you.', mob.slow)
+    if (mob.cc > 0) ccA('cc', 'cc', 'escape', mob.ccl === 'poly' ? 'Polymorphed' : mob.ccl === 'ice' ? 'Frozen' : 'Incapacitated', 'One enemy of the group is out of the fight.', mob.cc)
     if (mob.boss === 'zone') list.push({ icon: stateIcon('boss', 'bloodfury'), name: 'Zone Boss', desc: 'Much more health and damage than normal enemies.', kind: 'buff' })
     else if (mob.boss === 'mini') list.push({ icon: stateIcon('elite', 'bloodfury'), name: 'Elite', desc: 'More health and damage than normal enemies.', kind: 'buff' })
     return list
@@ -542,6 +696,28 @@ export class Scene {
   hurtT = 0
   atkT = 0
   deathT = 0
+  // strzał z broni dystansowej (łowca z łukiem/strzelbą, różdżka) — rodzaj pocisku albo null
+  shotKind(s: GameState, ability?: string): ProjKind | null {
+    const h = s.hero
+    if (ability === 'Shoot' && h.equip.ranged?.weaponType === 'Wand') return 'wand'
+    if (h.cls !== 'hunter' || !h.equip.ranged || (s.phase === 'fight' && heroInMelee(s))) return null
+    if (ability && /strike|bite|clip|counterattack/i.test(ability)) return null
+    const w = h.equip.ranged.weaponType
+    return w === 'Gun' ? 'bullet' : w === 'Thrown' ? 'thrown' : 'arrow'
+  }
+  // wypuszcza pocisk; zwraca czas lotu (liczba obrażeń pojawia się przy trafieniu)
+  shoot(kind: ProjKind, school: School, from: { x: number; y: number }, to: { x: number; y: number }, crit: boolean, hits: boolean) {
+    const dist = Math.max(10, to.x - from.x)
+    const speed = kind === 'bullet' ? 1400 : kind === 'arrow' ? 760 : kind === 'thrown' ? 560 : kind === 'arcane' ? 620 : 480
+    const dur = Math.min(0.45, dist / speed)
+    const sc = this.sc
+    this.vfx.proj({
+      kind, school, x0: from.x, y0: from.y, x1: to.x + (hits ? 0 : 14 * sc), y1: to.y + (hits ? 0 : -6 * sc), dur, crit,
+      arc: kind === 'arrow' ? Math.min(14 * sc, dist * 0.06) : kind === 'thrown' ? 6 * sc : 0,
+      onHit: hits ? () => this.vfx.hit({ kind: 'burst', school: kind === 'arrow' || kind === 'bullet' || kind === 'thrown' ? 'physical' : school, x: to.x, y: to.y, gy: this.groundY, life: 0.35, crit }) : undefined,
+    })
+    return dur
+  }
   heroKey(s: GameState): HeroKey {
     const h = s.hero
     const shooting = h.cls === 'hunter' && !!h.equip.ranged && !(s.phase === 'fight' && heroInMelee(s))
@@ -552,6 +728,145 @@ export class Scene {
     const o = h.equip.offhand?.weaponType
     const off: OffKind = !o ? 'none' : o === 'Shield' ? 'Shield' : o === 'Orb' ? 'Orb' : 'Weapon'
     return { race: h.race, cls: h.cls, weapon, off }
+  }
+  // rysuje sprite odwrócony w poziomie (wróg uciekający w strachu)
+  blitFlip(sp: Sprite, x: number, gy: number, mult: number, flip: boolean) {
+    if (!flip) return this.blitS(sp, x, gy, mult)
+    const c = this.ctx
+    c.save(); c.translate(x * 2, 0); c.scale(-1, 1)
+    const r = this.blitS(sp, x, gy, mult)
+    c.restore()
+    return { ...r, left: 2 * x - r.right, right: 2 * x - r.left }
+  }
+  // Efekty kontroli tłumu na wrogu — pikselowe, w skali sprite'ów
+  mobCC(m: NonNullable<GameState['mob']>, r: { top: number; left: number; right: number; k: number }, gy: number, rear: boolean) {
+    if (m.stun > 0 && !rear) this.ccFx(m.cct === 'fear' ? 'fear' : (m.cct ?? 'stun'), r, gy)
+    if (m.stun > 0 && rear && (m.cct === 'stun' || m.cct === 'fear')) this.ccFx(m.cct === 'fear' ? 'fear' : 'stun', r, gy)
+    if ((m.root ?? 0) > 0) this.ccFx(m.rootl === 'ice' ? 'frozenfeet' : 'roots', r, gy)
+    if ((m.fear ?? 0) > 0 && m.stun <= 0) this.ccFx('fear', r, gy)
+    if (m.slow > 0) this.ccFx('slow', r, gy)
+  }
+  private pat(rows: string[], x: number, y: number, u: number, pal: Record<string, string>, alpha = 1) {
+    const c = this.ctx
+    const w = rows[0].length, h = rows.length
+    const x0 = Math.round(x - (w * u) / 2), y0 = Math.round(y - (h * u) / 2)
+    c.save(); c.globalAlpha *= alpha
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const col = pal[rows[j][i]]
+      if (!col) continue
+      c.fillStyle = col; c.fillRect(x0 + i * u, y0 + j * u, u, u)
+    }
+    c.restore()
+  }
+  ccFx(kind: string, r: { top: number; left: number; right: number; k: number }, gy: number) {
+    const c = this.ctx, u = r.k, t = this.t
+    const U = Math.max(u, Math.round(u * 1.5 * this.dpr) / this.dpr) // większe piksele dla znaczków nad głową
+    const cx = (r.left + r.right) / 2, w = r.right - r.left, hgt = gy - r.top
+    switch (kind) {
+      case 'stun': {
+        const STAR = ['..a..', '.aba.', 'abbba', '.aba.', '..a..']
+        for (let i = 0; i < 3; i++) {
+          const a = t * 4.5 + (i * Math.PI * 2) / 3
+          const front = Math.sin(a) > 0
+          this.pat(STAR, cx + Math.cos(a) * Math.max(9 * u, w * 0.42), r.top + 3 * u + Math.sin(a) * 2.5 * u, U, { a: front ? '#e8b020' : '#9a7010', b: front ? '#fff6a0' : '#c8a040' })
+        }
+        return
+      }
+      case 'sleep': {
+        const Z = ['aaaa', '..a.', '.a..', 'aaaa']
+        for (let i = 0; i < 3; i++) {
+          const ph = (t * 0.55 + i / 3) % 1
+          this.pat(Z, cx + 6 * u + ph * 8 * u + Math.sin(ph * 6) * u, r.top + 4 * u - ph * 12 * u, Math.max(1, Math.round(U * (0.6 + ph * 0.6))), { a: '#d8ecff' }, 1 - ph * 0.8)
+        }
+        return
+      }
+      case 'daze': {
+        for (let i = 0; i < 7; i++) {
+          const a = t * 6 + i * 0.9, rad = (2 + i * 1.1) * u
+          c.fillStyle = i % 2 ? '#d8d0ff' : '#9a88e0'
+          c.fillRect(Math.round(cx + Math.cos(a) * rad), Math.round(r.top + 2 * u + Math.sin(a) * rad * 0.45), U, U)
+        }
+        return
+      }
+      case 'silence': {
+        const NO = ['..aaa..', '.a...a.', 'a...a.a', 'a..a..a', 'a.a...a', '.a...a.', '..aaa..']
+        this.pat(NO, cx + 8 * u, r.top + 2 * u + Math.sin(t * 3) * u, U, { a: '#c070ff' })
+        return
+      }
+      case 'fear': {
+        const SK = ['.aaa.', 'abaab', 'aaaaa', '.a.a.']
+        this.pat(SK, cx + 8 * u, r.top + 2 * u + Math.sin(t * 5) * u, U, { a: '#e8dcff', b: '#3a1060' })
+        for (let i = 0; i < 4; i++) {
+          const ph = (t * 0.8 + i / 4) % 1
+          c.fillStyle = `rgba(150,70,220,${0.7 * (1 - ph)})`
+          c.fillRect(Math.round(cx - 6 * u + i * 4 * u), Math.round(r.top + hgt * 0.4 - ph * 14 * u), u, 2 * u)
+        }
+        return
+      }
+      case 'roots': {
+        const n = Math.max(3, Math.round(w / (4 * u)))
+        const top = Math.min(hgt * 0.45, 16 * u)
+        for (let i = 0; i < n; i++) {
+          const bx = r.left + ((i + 0.5) / n) * w
+          for (let y = 0; y < top; y += u) {
+            const sx = Math.round(bx + Math.sin(y / (3 * u) + i * 1.7 + t * 1.2) * 1.6 * u)
+            c.fillStyle = (Math.floor(y / u) + i) % 3 === 0 ? '#3a6a1a' : '#5a9a2a'
+            c.fillRect(sx, Math.round(gy - y - u), u, u)
+            if (Math.floor(y / u) % 5 === 2) { c.fillStyle = '#9ae050'; c.fillRect(sx + (i % 2 ? u : -u), Math.round(gy - y - u), u, u) }
+          }
+        }
+        c.fillStyle = '#4a3418'; c.fillRect(Math.round(r.left - 2 * u), Math.round(gy - u), Math.round(w + 4 * u), u)
+        return
+      }
+      case 'frozenfeet': case 'iceblock': {
+        const full = kind === 'iceblock'
+        const hh = full ? hgt + 2 * u : Math.min(hgt * 0.4, 14 * u)
+        const x0 = Math.round(r.left - 2 * u), x1 = Math.round(r.right + 2 * u), y0 = Math.round(gy - hh)
+        c.fillStyle = 'rgba(150,215,255,.42)'; c.fillRect(x0, y0, x1 - x0, gy - y0)
+        c.fillStyle = 'rgba(230,250,255,.8)'
+        c.fillRect(x0, y0, x1 - x0, u); c.fillRect(x0, y0, u, gy - y0); c.fillRect(x1 - u, y0, u, gy - y0)
+        for (let i = 0; i < 4; i++) c.fillRect(Math.round(x0 + (2 + i) * u), Math.round(y0 + (2 + i * 2) * u), u, u)
+        // szpikulce lodu u góry
+        c.fillStyle = 'rgba(200,240,255,.9)'
+        for (let x = x0 + u; x < x1 - u; x += 3 * u) { c.fillRect(x, y0 - u, u, u); if ((x / u) % 2 < 1) c.fillRect(x, y0 - 2 * u, u, u) }
+        if (Math.sin(t * 2) > 0.85) { c.fillStyle = '#fff'; c.fillRect(x0 + 2 * u, y0 + 2 * u, u, u) }
+        return
+      }
+      case 'blind': {
+        for (let i = 0; i < 9; i++) {
+          const a = i * 0.7 + t * 1.5, rad = (3 + (i % 3) * 2) * u
+          c.fillStyle = i % 3 ? 'rgba(120,110,100,.7)' : 'rgba(200,190,170,.7)'
+          c.fillRect(Math.round(cx - 2 * u + Math.cos(a) * rad), Math.round(r.top + 4 * u + Math.sin(a) * rad * 0.6), 2 * u, 2 * u)
+        }
+        return
+      }
+      case 'slow': {
+        for (let i = 0; i < 5; i++) {
+          const ph = (t * 0.7 + i / 5) % 1
+          c.fillStyle = `rgba(140,200,255,${0.8 * (1 - ph)})`
+          c.fillRect(Math.round(r.left + ((i + 0.5) / 5) * w), Math.round(gy - 2 * u - ph * 10 * u), u, u)
+        }
+        return
+      }
+    }
+  }
+  // owca (Polymorph) — mały pikselowy sprite
+  sheep(x: number, gy: number, u: number) {
+    const S = [
+      '...wwwwww...',
+      '..wWwwwWww..',
+      'kkwwwwwwwww.',
+      'kekwWwwwwWw.',
+      'kkwwwwwwwww.',
+      '.k.wwwwwwww.',
+      '...k.k..k.k.',
+      '...k.k..k.k.',
+    ]
+    const bob = Math.sin(this.t * 3) > 0.6 ? u : 0
+    u = Math.max(u, Math.round(u * 1.4 * this.dpr) / this.dpr)
+    this.pat(S, x, gy - 4 * u - bob, u, { w: '#f0ece0', W: '#c8c0b0', k: '#2a2420', e: '#e04040' })
+    // pink polymorph sparkle
+    if (Math.sin(this.t * 4) > 0.5) { this.ctx.fillStyle = '#ffa0f0'; this.ctx.fillRect(Math.round(x + 5 * u), Math.round(gy - 12 * u), u, u) }
   }
   // rysuje sprite stopami w (x, gy); skala w całych pikselach ekranu, bez wygładzania. Zwraca obrys treści.
   blitS(sp: Sprite, x: number, gy: number, mult = 1) {
@@ -595,7 +910,17 @@ export class Scene {
     const key = this.heroKey(s)
     let anim: Anim = 'idle', f = fr(6, 8)
     const shooting = key.weapon === 'Bow' || key.weapon === 'Gun' || key.weapon === 'Crossbow'
-    if (dead) { anim = 'death'; f = Math.min(7, Math.floor(this.deathT / 0.14)) }
+    const ghost = dead && this.deathT > 2
+    if (dead && !ghost) { anim = 'death'; f = Math.min(7, Math.floor(this.deathT / 0.14)) }
+    else if (ghost) {
+      // zwłoki: zostają w tyle, a pod koniec biegu ducha wracają z prawej strony
+      const sp = 63
+      let cx: number | null = null
+      if (s.phaseT <= 2.5) cx = x + Math.max(0, (s.phaseT - 0.6) / 1.9) * (this.w + 40 - x)
+      else { const gx = x - (this.deathT - 2) * sp; if (gx > -40) cx = gx }
+      if (cx !== null) { c.save(); c.filter = 'grayscale(.7) brightness(.8)'; this.blitS(heroSprite(key, 'death', 7), cx, gy); c.restore() }
+      anim = moving ? 'walk' : 'idle'; f = moving ? fr(10, 8) : fr(4, 8)
+    }
     else if (s.phase === 'rest') { anim = 'sit'; f = fr(1.5, 2) }
     else if (moving) { anim = 'walk'; f = fr(12, 8) }
     else if (this.hurtT > 0 && this.atkT <= 0) { anim = 'hurt'; f = Math.min(3, Math.floor((0.24 - this.hurtT) / 0.06)) }
@@ -603,11 +928,36 @@ export class Scene {
     else if (h.casting || this.castGlow > 0) { anim = 'cast'; const t = Math.floor(this.heroAnimT * 12); f = t < 3 ? t : 3 + (t % 5) }
     if (anim !== this.lastAnim) { if (anim === 'cast' || anim === 'walk' || anim === 'idle') this.heroAnimT = 0; this.lastAnim = anim }
     const L = LOOKS[h.race]
-    if (!dead || f < 7) this.shadow(x, gy, (L.torsoW * 0.75 + 2) * p)
+    if (!dead) this.shadow(x, gy, (L.torsoW * 0.75 + 2) * p)
     c.save()
-    if (dead && this.deathT > 1.2) { c.globalAlpha = 0.5; c.filter = 'grayscale(1) brightness(1.4)' }
-    this.blitS(heroSprite(key, anim, f), x + (this.heroLunge > 0 && anim !== 'attack' ? 3 : 0), gy)
+    let gyH = gy
+    if (ghost) {
+      // duch: półprzezroczysty, niebieskawy, lekko unosi się nad ziemią
+      const a = Math.min(1, (this.deathT - 2) / 0.6)
+      c.globalAlpha = 0.6 * a
+      c.filter = 'grayscale(1) brightness(1.5) sepia(1) hue-rotate(165deg) saturate(2.2) drop-shadow(0 0 3px #8ad8ff)'
+      gyH = gy - Math.round((2 + Math.sin(this.t * 2.4) * 1.5) * p)
+    }
+    this.blitS(heroSprite(key, anim, f), x + (this.heroLunge > 0 && anim !== 'attack' ? 3 : 0), gyH)
     c.restore()
+    // rzucanie czaru: iskry w kolorze szkoły zbierają się w dłoni
+    if (h.casting && !dead) {
+      const ab = classById(h.cls).abilities.find((a) => a.id === h.casting!.id)
+      const P = PAL[ab?.school ?? 'holy']
+      const prog = 1 - h.casting.left / Math.max(0.01, h.casting.total)
+      const u = this.sc, hx2 = x + 8 * u, hy = gy - 14 * u
+      for (let i = 0; i < 6; i++) {
+        const a = this.t * 7 + i * 1.05, rad = (9 - prog * 6) * u
+        c.fillStyle = i % 2 ? P[2] : P[1]
+        c.fillRect(Math.round(hx2 + Math.cos(a) * rad), Math.round(hy + Math.sin(a) * rad * 0.7), Math.ceil(u), Math.ceil(u))
+      }
+      c.fillStyle = P[3]; c.fillRect(Math.round(hx2 - u), Math.round(hy - u), Math.ceil(2 * u * (0.5 + prog)), Math.ceil(2 * u * (0.5 + prog)))
+    }
+    if (ghost) for (let i = 0; i < 4; i++) {
+      const ph = (this.t * 0.9 + i / 4) % 1
+      c.fillStyle = `rgba(170,225,255,${0.6 * (1 - ph)})`
+      c.fillRect(Math.round(x - 8 * p + i * 5 * p), Math.round(gy - 4 * p - ph * 22 * p), Math.max(1, Math.round(p)), Math.max(1, Math.round(p)))
+    }
     const top = gy - (L.leg + L.torsoH + L.headH) * p
     if (h.shield > 0) { c.strokeStyle = 'rgba(255,240,160,.7)'; c.lineWidth = 2; c.beginPath(); c.arc(x, gy - (L.leg + L.torsoH) * p * 0.8, (L.leg + L.torsoH + L.headH) * p * 0.75, 0, Math.PI * 2); c.stroke() }
     if (s.phase === 'rest') this.text('🍞', x + 12 * p, top + 6 * p, '#fff', 12)

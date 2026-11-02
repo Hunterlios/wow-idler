@@ -74,6 +74,12 @@ export type MobState = {
   dist0: number
   cc: number // jeden z grupy obezwładniony (Polymorph, Freezing Trap)
   slow: number // spowolnienie (Frost Shock): wolniej podchodzi
+  root?: number // unieruchomienie (Entangling Roots, Frost Nova): nie podchodzi
+  fear?: number // strach: ucieka / nie atakuje
+  cct?: string // wygląd ogłuszenia: stun, sleep, daze, silence
+  ccl?: string // wygląd obezwładnienia jednego z grupy: poly, ice, blind
+  rootl?: string // wygląd unieruchomienia: root, ice
+  by?: Record<string, string> // która umiejętność nałożyła dany efekt (stun/root/fear/slow/cc)
 }
 
 export type TotemState = { id: string; el: string; left: number; tickIn: number }
@@ -143,7 +149,7 @@ export type Quest = {
 export type ZoneProgress = { cleared: number; kills: number; bossAt?: number; bossFails?: number }
 
 export type GameEvent =
-  | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'parry' | 'absorb'; glance?: boolean }
+  | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'parry' | 'absorb'; glance?: boolean; tick?: boolean }
   | { t: 'heal'; amt: number; ability?: string }
   | { t: 'cast'; ability: string; school?: School; kind: string }
   | { t: 'xp'; amt: number; rested: number }

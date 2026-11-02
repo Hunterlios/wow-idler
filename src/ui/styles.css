@@ -559,3 +559,19 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .snd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 14px; margin: 2px 0 8px; }
 .snd-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .snd-row { min-width: 0; } .snd-row span { width: 58px; flex: none; } .snd-row input { flex: 1 1 auto; min-width: 0; width: 100%; accent-color: var(--gold); } .snd-row b { flex: none; } .snd-row b { width: 34px; text-align: right; font-weight: normal; color: #ccc; }
+
+/* 0.9.8: odstępy między przyciskami (kupiec, trener, zadania, okna) */
+.vend-buy { gap: 6px; }
+.vend-buy .money { margin-right: 6px; }
+.vend-actions, .tr-foot { gap: 8px; row-gap: 6px; flex-wrap: wrap; }
+.tabs { gap: 6px; }
+.vendor .tr-row { padding-top: 3px; padding-bottom: 3px; }
+.tr-row > .wbtn, .tr-row > span > .wbtn { flex-shrink: 0; }
+.wbtn.small { padding: 2px 8px; min-width: 28px; justify-content: center; }
+.town-btns { gap: 6px !important; }
+.wbtn + .wbtn { margin-left: 0; }
+:where(.parchment, .wframe) :where(div, span, p) > .wbtn + .wbtn { margin-left: 4px; }
+.vend-actions > .wbtn + .wbtn, .vend-buy > .wbtn + .wbtn, .tabs > .tab + .tab { margin-left: 0; }
+/* 0.9.8: okna w doku zachowują rozmiar (nie ściskają się), w razie braku miejsca nachodzą na siebie */
+.dock-left { max-width: none; }
+.dock-left > * { flex: none; }

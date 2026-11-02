@@ -1,7 +1,7 @@
 {
   "name": "azeroth-idle",
   "productName": "Azeroth Idle",
-  "version": "0.9.6",
+  "version": "0.9.8",
   "private": true,
   "description": "Idle RPG w klimacie WoW Classic, który siedzi na dole ekranu i gra się sam.",
   "main": "electron/main.cjs",

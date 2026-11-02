@@ -225,19 +225,43 @@ export function Frame({ id, title, onClose, children, className, icon, style }: 
   offRef.current = off
   const zoom = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui') || '1') || 1
   const box = useRef<HTMLDivElement>(null)
-  // po otwarciu, zmianie rozmiaru okna i po przeciągnięciu: wróć na ekran, jeśli uciekło
+  // Okna zachowują swój rozmiar. Gdy kilka otwartych nie mieści się obok siebie, te wystające za ekran
+  // są tymczasowo przesuwane (fit, niezapisywane) i nachodzą na inne — na wierzchu jest to kliknięte.
+  const [fit, setFit] = useState({ dx: 0, dy: 0 })
+  const fitRef = useRef(fit)
+  fitRef.current = fit
   useEffect(() => {
-    const fix = () => { const n = keepOnScreen(box.current, offRef.current, zoom()); if (n !== offRef.current) { setOff(n); if (id) saveLayout({ frames: { ...layout().frames, [id]: n } }) } }
-    fix()
-    window.addEventListener('resize', fix)
-    return () => window.removeEventListener('resize', fix)
+    const refit = () => {
+      const el = box.current
+      if (!el) return
+      const z = zoom()
+      const r = el.getBoundingClientRect()
+      const W = window.innerWidth, H = window.innerHeight
+      const f0 = fitRef.current
+      const left = r.left - f0.dx * z, right = r.right - f0.dx * z, top = r.top - f0.dy * z, bottom = r.bottom - f0.dy * z
+      let fx = 0, fy = 0
+      if (right > W) fx = -(right - W)
+      if (left + fx < 0) fx = -left
+      if (bottom > H) fy = -Math.min(bottom - H, Math.max(0, top))
+      if (top + fy < 0) fy = -top
+      const n = { dx: fx / z, dy: fy / z }
+      if (Math.abs(n.dx - f0.dx) > 0.5 || Math.abs(n.dy - f0.dy) > 0.5) { fitRef.current = n; setFit(n) }
+    }
+    bringToFront(box.current) // nowo otwarte okno na wierzchu
+    const raf = requestAnimationFrame(refit)
+    window.addEventListener('resize', refit)
+    window.addEventListener('ui-layout', refit)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', refit); window.removeEventListener('ui-layout', refit) }
   }, [])
   return (
-    <div ref={box} className={`wframe ${className ?? ''}`} data-solid style={{ ...style, transform: `translate(${off.dx}px, ${off.dy}px)` }} onPointerDownCapture={() => bringToFront(box.current)}>
+    <div ref={box} className={`wframe ${className ?? ''}`} data-solid style={{ ...style, transform: `translate(${off.dx + fit.dx}px, ${off.dy + fit.dy}px)` }} onPointerDownCapture={() => bringToFront(box.current)}>
       <div className="wframe-head" onDoubleClick={() => { if (id) { setOff({ dx: 0, dy: 0 }); saveLayout({ frames: { ...layout().frames, [id]: { dx: 0, dy: 0 } } }) } }}
         onPointerDown={(e) => {
           if (!id || (e.target as HTMLElement).closest('button')) return
-          const base = offRef.current
+          // przeciągnięcie: bieżące przesunięcie „dopasowania” staje się zapisaną pozycją okna
+          const f = fitRef.current
+          const base = { dx: offRef.current.dx + f.dx, dy: offRef.current.dy + f.dy }
+          if (f.dx || f.dy) { fitRef.current = { dx: 0, dy: 0 }; setFit(fitRef.current); setOff(base); offRef.current = base }
           startDrag(e, (dx, dy) => setOff({ dx: base.dx + dx / zoom(), dy: base.dy + dy / zoom() }), () => { const n = keepOnScreen(box.current, offRef.current, zoom()); setOff(n); offRef.current = n; saveLayout({ frames: { ...layout().frames, [id]: n } }) })
         }} style={{ cursor: id ? 'move' : undefined }}>
         {icon && <img className="wframe-icon" src={icon} alt="" draggable={false} />}

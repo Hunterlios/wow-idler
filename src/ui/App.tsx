@@ -10,7 +10,7 @@ import { Strip, type PanelId } from './Strip'
 import { DragGhost, setDropHandler, setPickHandler, type DragSrc } from './dnd'
 import { onGameEvent, updateLoops, uiOpen, uiClick, uiMicro, itemPick, itemDrop, uiSound, npcGreet } from '../audio/gamesounds'
 import { gameSpeed } from '../game/admin'
-import { dropItem } from './itemActions'
+import { dropItem, setEquipHook } from './itemActions'
 import { BagsPanel, CharacterPanel, CityPanel, LogPanel, QuestLog, Settings, SkillsPanel, Spellbook, TalentsPanel, fmtTime } from './Panels'
 import { onLayout, uiScale } from './layout'
 import { MapPanel } from './MapPanel'
@@ -70,6 +70,8 @@ export function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500)
   }, [])
   const toggle = useCallback((p: PanelId) => setOpen((o) => { const n = new Set(o); if (n.has(p)) n.delete(p); else n.add(p); uiOpen(p, n.has(p)); return n }), [])
+  useEffect(() => { const r = requestAnimationFrame(() => window.dispatchEvent(new Event('ui-layout'))); return () => cancelAnimationFrame(r) }, [open])
+  setEquipHook(() => setOpen((o) => { if (o.has('char')) return o; const n = new Set(o); n.add('char'); uiOpen('char', true); return n }))
   const close = (p: PanelId) => setOpen((o) => { const n = new Set(o); if (n.has(p)) uiOpen(p, false); n.delete(p); return n })
 
   // skala UI (zoom) liczona z wysokości okna albo z ustawień
@@ -226,7 +228,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — browser version (demo 0.9.6)</b>
+        <b>Azeroth Idle — browser version (demo 0.9.8)</b>
         <span>In the desktop app the background is transparent and the bar sits above the Windows taskbar.</span>
         <span>Hotkeys: C character · B bags · L quests · P spellbook · N talents · K skills · M map · Esc closes windows</span>
       </div>

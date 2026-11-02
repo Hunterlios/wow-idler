@@ -12,7 +12,7 @@ import { exportSave, importSave } from '../game/save'
 import { isAdmin, unlockAdmin, lockAdmin } from '../game/admin'
 import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, type EquipSlot, type GameState, type Quest } from '../game/types'
 import { segmentsOf, equipFromInv, unequip, sortBags, BACKPACK, capacity, usedSlots } from '../game/inventory'
-import { rightClickInv, rightClickEquip } from './itemActions'
+import { rightClickInv, rightClickEquip, setVendorOpen, canSell } from './itemActions'
 import { boardFor, acceptQuest, abandonQuest, questReady, questXp, MAX_QUESTS } from '../game/quests'
 import { trainerRows, train, trainAll, sellJunk, buyBag, turnIn, placeName, buyBack, buyFood, buyKit, restock, weaponRows, trainWeapon, travel, bindHearth, repairAll, repairAllCost, repairDiscount } from '../game/town'
 import { TravelConfirm } from './MapPanel'
@@ -186,7 +186,7 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
     return () => window.removeEventListener('resize', fix)
   }, [])
   const segs = segmentsOf(h)
-  const vendor = s.where !== 'field'
+  const vendor = canSell(s)
   let base = 0
   const blocks = segs.map((seg, i) => {
     const start = base
@@ -287,7 +287,7 @@ export function QuestLog({ s, onClose, bump, toast }: { s: GameState; onClose: (
 export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: () => void } & Act) {
   const capital = s.where === 'capital'
   type Tab = 'quests' | 'trainer' | 'vendor' | 'weapons'
-  const [tab, setTab] = useState<Tab>(capital ? 'vendor' : 'quests')
+  const [tab, setTab] = useState<Tab>(capital ? 'trainer' : 'quests')
   const tabs: [Tab, string][] = capital ? [['vendor', 'Vendor'], ['trainer', 'Trainer'], ['weapons', 'Weapon Master']] : [['quests', 'Quests'], ['vendor', 'Vendor']]
   return (
     <Frame id="city" title={placeName(s)} onClose={onLeave} className="city-frame" icon={menuIcon(capital ? 'capital' : 'town')}>
@@ -385,6 +385,7 @@ function Vendor({ s, bump, toast }: { s: GameState } & Act) {
   })
   const buy = (name: string, n: number) => { const e = buyFood(s, name, n); if (e) toast(e, '#ff4040'); else uiSound('ui.coins', 80); bump() }
   const repairCost = repairAllCost(s)
+  useEffect(() => { setVendorOpen(true); return () => setVendorOpen(false) }, [])
   return (
     <div className="parchment vendor" data-drop="vendor">
       <div className="tr-head"><span>General Goods</span><span><Money copper={h.copper} /></span></div>
@@ -525,6 +526,7 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
               {(h.cls === 'hunter' ? ([['mixed', 'Ranged', 'shoots from range; your pet holds the enemy. Without a pet you switch to your melee weapon when the enemy reaches you'], ['melee', 'Melee', 'runs to the enemy and fights with your melee weapon (Raptor Strike, Mongoose Bite, Wing Clip)']] as const) : ([['mixed', 'Mixed', 'spells from range while the enemy approaches; in melee, weapon strikes and instant spells only'], ['melee', 'Melee', 'runs straight to the enemy, casts instant spells only'], ['caster', 'Caster', 'keeps casting spells in melee too (weapon attacks only when out of mana)']] as const)).map(([k, l, t]) => (
                 <label key={k}><input type="radio" checked={(h.mode ?? 'mixed') === k} onChange={() => { h.mode = k; bump() }} /> <b>{l}</b> <span className="pdim">— {t}</span></label>
               ))}
+              {h.cls === 'hunter' && !h.equip.ranged && <div className="pdim" style={{ color: '#ff8060' }}>No ranged weapon equipped: you fight in melee until you equip a bow, gun or crossbow.</div>}
             </div>
           </div>
         )}

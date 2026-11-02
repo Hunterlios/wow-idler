@@ -23,14 +23,23 @@ function sell(s: GameState, idx: number): Res {
   return { msg: `Sold ${it.name}${(it.count ?? 1) > 1 ? ` ×${it.count}` : ''} for ${money(v)} (buy it back in the Buyback tab)`, color: '#ffffff' }
 }
 
-// Prawy przycisk na przedmiocie w torbie: u kupca sprzedaj, w polu załóż / użyj
+// Sprzedaż tylko przy otwartej zakładce kupca (jak w grze: okno handlu). Inaczej w mieście też można zmieniać ekwipunek.
+let vendorOpen = false
+export const setVendorOpen = (v: boolean) => { vendorOpen = v }
+export const canSell = (s: GameState) => vendorOpen && s.where !== 'field'
+// po założeniu przedmiotu z torby otwórz okno postaci (widać zmianę od razu)
+let onEquipped: () => void = () => {}
+export const setEquipHook = (f: () => void) => { onEquipped = f }
+
+// Prawy przycisk na przedmiocie w torbie: u kupca sprzedaj, poza tym załóż / użyj
 export function rightClickInv(s: GameState, idx: number): Res {
   const h = s.hero
   const it = h.inv[idx]
   if (!it) return null
-  if (s.where !== 'field') return sell(s, idx)
+  if (canSell(s)) return sell(s, idx)
   if (it.food) { const e = useItem(s, idx); stats(h); if (!e) uiSound(it.food.kind === 'drink' ? 'ui.drink' : 'ui.eat', 300); return e ? err(e) : { msg: `${it.name}: Well Fed`, color: '#40ff40' } }
-  if (it.bagSize || it.slot) { const e = equipFromInv(h, idx); if (!e) itemDrop(it); return err(e) }
+  if (it.bagSize || it.slot) { const e = equipFromInv(h, idx); if (!e) { itemDrop(it); if (it.slot) onEquipped() } return err(e) }
+  if (s.where !== 'field') return err('Open the Vendor tab to sell items.')
   return null
 }
 
@@ -55,7 +64,7 @@ export function dropItem(s: GameState, src: DragSrc, target: string | null): Res
     const it = h.inv[src.idx]
     if (!it) return null
     if (kind === 'inv') { moveInv(h, src.idx, Number(arg)); return null }
-    if (kind === 'vendor') return s.where !== 'field' ? sell(s, src.idx) : err('You can only sell to a vendor in town.')
+    if (kind === 'vendor') return canSell(s) ? sell(s, src.idx) : err('You can only sell to a vendor in town.')
     if (kind === 'eq' && isSlot(arg)) {
       if (!fitsSlot(it, arg)) return err('That doesn\'t go in that slot.')
       if (!canWear(h, it)) return err('You can\'t use that.')
