@@ -31,22 +31,22 @@ export function questsFor(s: GameState, zoneId: string, sub: number): Quest[] {
   const out: Quest[] = [
     {
       id: `${zoneId}:${sub}:k`, zone: zoneId, sub, kind: 'kill', target: kill[0], need: needK, have: 0, level: lvl,
-      title: `Zagrożenie w ${sz.name}`,
-      text: `Mieszkańcy ${town} skarżą się na ${kill[0]}. Zabij ${needK} z nich w okolicy ${sz.name} i wróć po nagrodę.`,
+      title: `Trouble in ${sz.name}`,
+      text: `The people of ${town} are complaining about ${kill[0]}. Kill ${needK} of them around ${sz.name} and return for your reward.`,
       xp: Math.round(xpBase * 0.1), copper,
     },
     {
       id: `${zoneId}:${sub}:c`, zone: zoneId, sub, kind: 'collect', target: col[0], item, need: needC, have: 0, level: lvl,
-      title: `Zbieranie: ${item}`,
-      text: `Kwatermistrz w ${town} potrzebuje materiałów. Zdobądź ${needC}× ${item} z ${col[0]}.`,
+      title: `Gathering: ${item}`,
+      text: `The quartermaster in ${town} needs supplies. Collect ${needC}× ${item} from ${col[0]}.`,
       xp: Math.round(xpBase * 0.1), copper,
     },
     {
       id: `${zoneId}:${sub}:b`, zone: zoneId, sub, kind: 'boss', target: sz.boss.name, need: 1, have: 0, level: bossLvl,
-      title: sz.zoneBoss ? `Koniec rządów: ${sz.boss.name}` : `Głowa: ${sz.boss.name}`,
+      title: sz.zoneBoss ? `The End of ${sz.boss.name}` : `The Head of ${sz.boss.name}`,
       text: sz.zoneBoss
-        ? `${sz.boss.name} blokuje drogę dalej. Pokonaj go w ${sz.name}, a droga do następnej krainy stanie otworem.`
-        : `${sz.boss.name} terroryzuje ${sz.name}. Przynieś dowód, że już nikomu nie zagrozi.`,
+        ? `${sz.boss.name} blocks the road ahead. Defeat them in ${sz.name} and the way to the next land will be open.`
+        : `${sz.boss.name} terrorizes ${sz.name}. Bring proof that they will threaten no one again.`,
       xp: Math.round(xpBase * (sz.zoneBoss ? 0.25 : 0.16)), copper: copper * 2,
     },
   ]

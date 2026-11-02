@@ -15,10 +15,10 @@ const err = (e: string | null): Res => (e ? { msg: e, color: '#ff4040' } : null)
 function sell(s: GameState, idx: number): Res {
   const it = s.hero.inv[idx]
   if (!it) return null
-  if (it.quest) return err('Przedmiotów zadania nie można sprzedać.')
+  if (it.quest) return err('Quest items can\'t be sold.')
   const v = sellAt(s, idx)
   syncQuests(s)
-  return { msg: `Sprzedano ${it.name}${(it.count ?? 1) > 1 ? ` ×${it.count}` : ''} za ${money(v)} (odkupisz w zakładce Odkup)`, color: '#ffffff' }
+  return { msg: `Sold ${it.name}${(it.count ?? 1) > 1 ? ` ×${it.count}` : ''} for ${money(v)} (buy it back in the Buyback tab)`, color: '#ffffff' }
 }
 
 // Prawy przycisk na przedmiocie w torbie: u kupca sprzedaj, w polu załóż / użyj
@@ -43,26 +43,26 @@ export function dropItem(s: GameState, src: DragSrc, target: string | null): Res
   // upuszczenie na ikonę plecaka = pierwsze wolne miejsce w plecaku
   if (kind === 'bag' && arg === '-1') {
     const free = h.inv.slice(0, 16).findIndex((x) => !x)
-    if (free < 0) return err('Plecak jest pełny.')
+    if (free < 0) return err('Your backpack is full.')
     kind = 'inv'; arg = String(free)
   }
   if (src.k === 'inv') {
     const it = h.inv[src.idx]
     if (!it) return null
     if (kind === 'inv') { moveInv(h, src.idx, Number(arg)); return null }
-    if (kind === 'vendor') return s.where !== 'field' ? sell(s, src.idx) : err('Sprzedasz tylko u kupca w mieście.')
+    if (kind === 'vendor') return s.where !== 'field' ? sell(s, src.idx) : err('You can only sell to a vendor in town.')
     if (kind === 'eq' && isSlot(arg)) {
-      if (!fitsSlot(it, arg)) return err('To nie pasuje do tego miejsca.')
-      if (!canWear(h, it)) return err('Nie możesz tego używać.')
+      if (!fitsSlot(it, arg)) return err('That doesn\'t go in that slot.')
+      if (!canWear(h, it)) return err('You can\'t use that.')
       return err(equipFromInv(h, src.idx, arg))
     }
     if (kind === 'bag') {
       const i = Number(arg)
       if (it.bagSize && !h.bags[i]) return err(equipBagAt(h, src.idx, i))
-      if (!h.bags[i]) return err('To nie jest torba.')
+      if (!h.bags[i]) return err('That is not a bag.')
       const start = bagStart(h, i)
       const free = segmentsOf(h)[i + 1].findIndex((x) => !x)
-      if (free < 0) return err('Ta torba jest pełna.')
+      if (free < 0) return err('That bag is full.')
       moveInv(h, src.idx, start + free)
       return null
     }
@@ -77,16 +77,16 @@ export function dropItem(s: GameState, src: DragSrc, target: string | null): Res
     }
     if (kind === 'bag') {
       const i = Number(arg)
-      if (!h.bags[i]) return err('Brak torby w tym miejscu.')
+      if (!h.bags[i]) return err('There is no bag there.')
       const free = segmentsOf(h)[i + 1].findIndex((x) => !x)
-      if (free < 0) return err('Ta torba jest pełna.')
+      if (free < 0) return err('That bag is full.')
       return err(unequipTo(h, slot, bagStart(h, i) + free))
     }
   }
   if (src.k === 'bag') {
-    if (kind === 'inv') { const e = unequipBag(h, src.i, Number(arg)); return e ? err(e) : { msg: 'Torba zdjęta.', color: '#ffffff' } }
+    if (kind === 'inv') { const e = unequipBag(h, src.i, Number(arg)); return e ? err(e) : { msg: 'Bag removed.', color: '#ffffff' } }
     if (kind === 'bag') { moveBag(h, src.i, Number(arg)); return null }
-    if (kind === 'vendor') return err('Najpierw zdejmij torbę (przeciągnij ją do innej torby).')
+    if (kind === 'vendor') return err('Remove the bag first (drag it into another bag).')
   }
   return null
 }

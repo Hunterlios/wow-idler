@@ -8,6 +8,11 @@ export type NativeBridge = {
   getAutostart: () => boolean
   getDisplays?: () => { id: number; label: string; current: boolean }[]
   setDisplay?: (id: number) => void
+  dropAt?: (x: number, y: number) => void
+  onPlace?: (cb: (p: { x: number; y: number }) => void) => void
+  onReset?: (cb: () => void) => void
+  onDisplay?: (cb: () => void) => () => void
+  getAssets?: () => { base: string; icons: string[]; graphics: string[] } | null
 }
 
 declare global {

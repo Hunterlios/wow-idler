@@ -4,7 +4,7 @@ import type { MobType } from '../data/zones'
 
 export type Rarity = 0 | 1 | 2 | 3 | 4 // poor, common, uncommon, rare, epic
 export const RARITY_COLOR = ['#9d9d9d', '#ffffff', '#1eff00', '#0070dd', '#a335ee']
-export const RARITY_PL = ['Śmieć', 'Zwykły', 'Niezwykły', 'Rzadki', 'Epicki']
+export const RARITY_PL = ['Poor', 'Common', 'Uncommon', 'Rare', 'Epic']
 
 // Sloty ekwipunku jak w oknie postaci Classica
 export type EquipSlot =
@@ -40,9 +40,12 @@ export type Item = {
   dps?: number
   speed?: number
   stats?: Partial<Stats>
+  sp?: number // "Equip: +X do obrażeń i leczenia czarami" (moc czarów)
+  dur?: number // aktualna wytrzymałość (brak = pełna); 0 = zepsuty, nie daje bonusów
   bagSize?: number // torba
   count?: number // stos (śmieci, jedzenie, przedmioty zadań)
   food?: Food // jedzenie / picie / jedzenie z buffem
+  kit?: number // zestaw naprawczy: naprawia zepsute przedmioty do tego poziomu przedmiotu
   quest?: string // id zadania, do którego należy przedmiot
 }
 
@@ -75,7 +78,7 @@ export type MobState = {
 
 export type TotemState = { id: string; el: string; left: number; tickIn: number }
 
-export type Phase = 'walk' | 'fight' | 'rest' | 'dead' | 'travel' | 'town'
+export type Phase = 'walk' | 'fight' | 'rest' | 'dead' | 'travel' | 'town' | 'heal'
 export type Where = 'field' | 'town' | 'capital'
 
 export type Hero = {
@@ -102,6 +105,7 @@ export type Hero = {
   choice: Record<string, string> // wybór w grupach (nasycenie broni, pieczęć, aura, totem żywiołu)
   totems: TotemState[] // postawione totemy (znikają, gdy postać odchodzi)
   weaponSkills: string[] // wyuczone typy broni
+  wskill: Record<string, number> // poziom umiejętności broni (bez bonusu rasowego), limit = poziom × 5
   eating: { hp: number; mana: number; left: number } | null // jedzenie/picie w trakcie odpoczynku (na sekundę)
   wellFed: { name: string; fx: Record<string, number>; left: number } | null // buff z jedzenia
   stacks: Record<string, number> // ładunki: Maelstrom, Arcane Blast
@@ -110,7 +114,7 @@ export type Hero = {
   cds: Record<string, number>
   buffs: Record<string, number>
   casting: { id: string; left: number; total: number; mult?: number; pb?: number } | null
-  hot: { perTick: number; left: number; tickIn: number } | null
+  hot: { id?: string; name?: string; perTick: number; left: number; tickIn: number } | null
   shield: number
   gcd: number
   swing: number
@@ -136,10 +140,10 @@ export type Quest = {
   reward?: Item
 }
 
-export type ZoneProgress = { cleared: number; kills: number }
+export type ZoneProgress = { cleared: number; kills: number; bossAt?: number; bossFails?: number }
 
 export type GameEvent =
-  | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'absorb' }
+  | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'parry' | 'absorb'; glance?: boolean }
   | { t: 'heal'; amt: number; ability?: string }
   | { t: 'cast'; ability: string; school?: School; kind: string }
   | { t: 'xp'; amt: number; rested: number }
@@ -158,6 +162,7 @@ export type GameEvent =
   | { t: 'questdone'; quest: Quest }
   | { t: 'spawn'; mob: string; lvl: number; boss?: 'mini' | 'zone' }
   | { t: 'racial'; name: string }
+  | { t: 'skillup'; weapon: string; skill: number }
   | { t: 'totem'; name: string }
   | { t: 'interrupt'; ability: string }
 
@@ -165,7 +170,7 @@ export type LogLine = { time: number; text: string; color?: string }
 
 export type Totals = { kills: number; deaths: number; copper: number; xp: number; items: number; quests: number; played: number; bosses: number }
 
-export type Trip = { kind: 'walk' | 'ship' | 'zeppelin'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number } }
+export type Trip = { kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number }; path?: { zone: string; at: number }[] }
 
 export type GameState = {
   v: 4
@@ -186,6 +191,9 @@ export type GameState = {
   quests: Quest[]
   questsDone: string[]
   buyback: Item[] // ostatnie sprzedane (max 10)
+  home?: string // stolica przypisana do Hearthstone
+  inCap?: string // stolica, w której teraz jesteś
+  v09?: boolean
   totals: Totals
   log: LogLine[]
   savedAt: number

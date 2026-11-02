@@ -481,3 +481,53 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .ports .port-row { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 3px 0; }
 .trip-block { color: #8a1010; font-size: 12px; font-weight: bold; margin: 4px 0; }
 .map-port { font-size: 15px; pointer-events: none; }
+
+/* ---- v0.7 ---- */
+.tt-info { color: #ffd100; font-size: 12px; }
+.ql-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.hearth-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.bags-stack { pointer-events: none; } .bags-stack .bagwin { pointer-events: auto; }
+
+/* 0.8: debuffy na wrogu, wytrzymałość, umiejętności broni, Duch Uzdrowiciel */
+.debuffbar { display: flex; align-items: center; gap: 2px; height: 14px; overflow: hidden; white-space: nowrap; }
+.debuffbar .db-who { font-size: 10px; color: #ff9a8a; margin-right: 2px; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+.debuffbar .buff, .debuffbar .buff img { width: 13px; height: 13px; }
+.buff.debuff img { box-shadow: 0 0 0 1px #c02020; }
+.islot.worn { box-shadow: inset 0 0 0 2px #e0b000; }
+.islot.broken { box-shadow: inset 0 0 0 2px #e02020; }
+.islot.broken img { filter: grayscale(1) sepia(1) hue-rotate(-50deg) saturate(5) brightness(.6); }
+.broken-warn { color: #ff5050; font-size: 11px; margin: 4px 2px 0; }
+.wskills { margin: 6px 2px 2px; }
+.wskills .board-sec { color: #ffd100; border-color: #5a4a2a; }
+.wsk { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 6px; margin: 2px 0; font-size: 11px; }
+.wsk .bar-label { font-size: 9px; line-height: 12px; }
+.wbtn.spirit { background: linear-gradient(#3a5a8a, #1a2a4a); border-color: #8ab4ff; color: #d8e8ff; }
+.sp-row.racial img { width: 24px; height: 24px; }
+.vend-actions { flex-wrap: wrap; row-gap: 4px; }
+
+/* 0.9: wszystkie torby tej samej szerokości (6 kolumn), wyrównane do prawej */
+.bagwin { width: 270px; box-sizing: border-box; }
+.bagwin-grid { grid-template-columns: repeat(6, 38px); justify-content: end; }
+.bags-stack { align-items: flex-end; }
+/* liczniki na pasku akcji, grubsze paski rzucania / ataku */
+.abtn { position: relative; }
+.abtn-t { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: bold 13px var(--body); color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+.abtn-t.gcd { color: #c8c8c8; font-size: 11px; }
+.abtn-t.up { color: #7cff7c; align-items: flex-end; font-size: 10px; }
+.abtn-t.casting { color: #ffd24a; }
+.bar-lr { display: flex; justify-content: space-between; width: 100%; padding: 0 4px; box-sizing: border-box; }
+.swingbar .bar-label, .castbar .bar-label { font-size: 10px; line-height: 12px; }
+.skills-frame .wskills { min-width: 360px; }
+.skills-frame .wskills .board-sec { color: #5a3a10; border-color: #a08050; }
+/* 0.9.1: grafiki gracza */
+.pface-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.cls-ico { width: 14px; height: 14px; vertical-align: -2px; margin-right: 3px; border-radius: 2px; }
+.cc-ico { width: 26px; height: 26px; vertical-align: middle; margin-right: 6px; border-radius: 4px; box-shadow: 0 0 0 1px #000; }
+.map.img { background: #1a2a3a; }
+.map-name.sm { font-size: 9px; stroke-width: 2.5px; }
+.map-sub.sm { font-size: 8px; }
+.map-cap.sm { fill: #ffd100; font: bold 8px var(--body); text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 2.5px; }
+.map-lvl.small { font-size: 8px; fill: #fff; }
+.map-tabs { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
+.map-legend-html { margin-left: auto; font-size: 11px; color: #d8c8a0; }
+.map-legend-html i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px 0 8px; vertical-align: -1px; }

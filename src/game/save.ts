@@ -1,9 +1,11 @@
 import { classById, ranksOf, startSkills } from '../data/classes'
-import { ROUTES } from '../data/zones'
+import { ROUTES, ZONES } from '../data/zones'
+import { raceById } from '../data/races'
 import { subsOf } from './world'
 import { newGame } from './sim'
 import { fixInv, addToInv } from './inventory'
 import { makeQuestItem, makeFood, FOODS } from './items'
+import { questsFor } from './quests'
 import type { GameState, Item } from './types'
 
 const KEY = 'azeroth-idle-save-v1'
@@ -26,9 +28,9 @@ export function loadGame(): GameState | null {
 
 export function migrate(o: Any): GameState | null {
   if (!o || !o.hero) return null
-  if (o.v === 4) { fixInv(o.hero); if (o.mob) o.mob.slow ??= 0; return o as GameState }
-  if (o.v === 3) return v3to4(o)
-  if (o.v === 2) return v3to4(v2to3(o))
+  if (o.v === 4) { fixInv(o.hero); if (o.mob) o.mob.slow ??= 0; return up09(up08(o)) }
+  if (o.v === 3) return up09(up08(v3to4(o)))
+  if (o.v === 2) return up09(up08(v3to4(v2to3(o))))
   if (o.v !== 1) return null
   // v1 -> v2: zachowaj postać, poziom, pieniądze i ekwipunek; odblokuj mapy przebyte na starej trasie
   const old = o
@@ -61,8 +63,36 @@ export function migrate(o: Any): GameState | null {
   s.log = old.log ?? []
   s.savedAt = old.savedAt ?? Date.now()
   s.speed = old.speed ?? 1
-  s.log.push({ time: Date.now(), text: 'Zapis zaktualizowany do wersji 0.2: mapy z podstrefami, trener, zadania w mieście.', color: '#69ccf0' })
+  s.log.push({ time: Date.now(), text: 'Save updated to version 0.2.', color: '#69ccf0' })
   return s
+}
+
+// 0.9: Hearthstone trzeba przypisać w stolicy; starsze postacie, które już doszły do stolicy rasy, mają go przypisanego
+function up09(o: Any): GameState {
+  if (!o.home && !o.v09) {
+    const cap = ZONES.find((z) => z.capital === raceById(o.hero.race).start.capital)
+    if (cap && (o.unlocked ?? []).includes(cap.id)) o.home = cap.capital
+  }
+  if (!o.v09) {
+    // treść przyjętych zadań po angielsku
+    for (const q of o.quests ?? []) {
+      const fresh = questsFor(o, q.zone, q.sub).find((x) => x.id === q.id)
+      if (fresh) { q.title = fresh.title; q.text = fresh.text; if (q.kind === 'collect') q.item = q.item ?? fresh.item }
+    }
+  }
+  o.v09 = true
+  return o as GameState
+}
+
+// 0.8: umiejętność broni (istniejące postacie mają wyćwiczone znane bronie do limitu poziomu)
+function up08(o: Any): GameState {
+  const h = o.hero
+  if (!h.wskill) {
+    h.wskill = {}
+    for (const w of h.weaponSkills ?? []) h.wskill[w] = h.level * 5
+    o.log?.push({ time: Date.now(), text: 'Version 0.8: weapon skills, gear durability and repairs, Spirit Healer, racial abilities in combat, spell power.', color: '#69ccf0' })
+  }
+  return o as GameState
 }
 
 // v3 -> v4: wybór nasyceń/totemów, umiejętności broni, jedzenie, prawdziwe przedmioty zadań, odkup
@@ -100,7 +130,7 @@ function v3to4(o: Any): GameState {
   addToInv(h, makeFood(o.itemSeq++, food, 10))
   if (c.resource === 'mana') addToInv(h, makeFood(o.itemSeq++, FOODS.filter((f) => f.kind === 'drink' && f.lvl <= h.level).pop()!, 10))
   if (o.mob) { o.mob.dist ??= 0; o.mob.dist0 ??= 0; o.mob.cc ??= 0; o.mob.slow ??= 0 }
-  o.log?.push({ time: Date.now(), text: 'Wersja 0.4: przeciąganie przedmiotów, jedzenie i picie, totemy, umiejętności broni, talenty z WoW Forever. Punkty talentów zwrócone — rozdaj je od nowa (N).', color: '#69ccf0' })
+  o.log?.push({ time: Date.now(), text: 'Version 0.4: talent points refunded, spend them again (N).', color: '#69ccf0' })
   return o as GameState
 }
 
@@ -120,7 +150,7 @@ function v2to3(o: Any): GameState {
   o.trip = null
   if (o.mob) { o.mob.per ??= o.mob.maxHp / (o.mob.count || 1); o.mob.count ??= 1 }
   fixInv(h)
-  o.log?.push({ time: Date.now(), text: 'Wersja 0.3: talenty, wybór umiejętności, grupy mobów, statki i zeppeliny.', color: '#69ccf0' })
+  o.log?.push({ time: Date.now(), text: 'Version 0.3.', color: '#69ccf0' })
   return o as GameState
 }
 

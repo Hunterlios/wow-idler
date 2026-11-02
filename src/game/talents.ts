@@ -28,11 +28,11 @@ export function autoTalents(s: GameState, tree: number) {
 }
 
 export function resetTalents(s: GameState): string | null {
-  if (s.where !== 'capital') return 'Talenty zresetujesz u trenera w stolicy.'
+  if (s.where !== 'capital') return 'You can reset talents at a trainer in a capital city.'
   const cost = respecCost(s.hero.level)
-  if (s.hero.copper < cost) return 'Za mało pieniędzy.'
+  if (s.hero.copper < cost) return 'Not enough money.'
   s.hero.copper -= cost
   s.hero.talents = {}
-  log(s, 'Talenty zresetowane.', '#ffd100')
+  log(s, 'Talents reset.', '#ffd100')
   return null
 }

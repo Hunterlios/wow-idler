@@ -4,12 +4,14 @@ import { classById, isMelee, startSkills, type Ability, type Cond, type PetDef }
 import { raceById, type RaceId } from '../data/races'
 import type { ClassId } from '../data/classes'
 import { zoneById, ROUTES } from '../data/zones'
-import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, mobXp, rageConv, resourceOf, styleOf, xpToNext, MAX_LEVEL, type Derived } from './formulas'
-import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOODS } from './items'
+import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, mobXp, rageConv, resourceOf, styleOf, xpToNext, MAX_LEVEL, spellValue, spCoef, type Derived } from './formulas'
+import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOODS, damageGear } from './items'
+import { attackTable, trySkillUp, skillOf } from './wskill'
+import { RACIAL_ACTIVE, type RacialId } from '../data/races'
 import { addToInv, fixInv, countItems } from './inventory'
 import { syncQuests } from './quests'
 import { makeRng, type Rng } from './rng'
-import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip, portsOf, RIDE_SECS } from './world'
+import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip, portsOf } from './world'
 import type { GameEvent, GameState, Hero, Item, MobState, OfflineSummary } from './types'
 import { ranksOf } from '../data/classes'
 
@@ -26,7 +28,7 @@ export function newGame(name: string, race: RaceId, cls: ClassId, seed = (Date.n
   const hero: Hero = {
     name, race, cls, faction: r.faction, level: 1, xp: 0, rested: 0, hp: 1, res: 0, cp: 0, copper: 0,
     equip: {}, bags: [null, null, null, null], inv: [], trained: {}, talents: {}, disabled: {}, form: 'caster', pet: 'imp', temp: {},
-    choice: {}, totems: [], weaponSkills: startSkills(classById(cls)), eating: null, wellFed: null, stacks: {}, heroDodged: false,
+    choice: {}, totems: [], weaponSkills: startSkills(classById(cls)), wskill: Object.fromEntries(startSkills(classById(cls)).map((w) => [w, 5])), eating: null, wellFed: null, stacks: {}, heroDodged: false,
     cds: {}, buffs: {}, casting: null, hot: null, shield: 0, gcd: 0, swing: 0, sinceCast: 99, petSwing: 0,
   }
   for (const it of starterGear(hero)) hero.equip[it.slot === 'twohand' ? 'mainhand' : (it.slot as keyof Hero['equip'])] = it
@@ -45,7 +47,7 @@ export function newGame(name: string, race: RaceId, cls: ClassId, seed = (Date.n
     totals: { kills: 0, deaths: 0, copper: 0, xp: 0, items: 0, quests: 0, played: 0, bosses: 0 }, log: [], savedAt: Date.now(), speed: 1,
   }
   const parent = zoneById(start).parent
-  log(s, `${name} budzi się w ${r.start.area}${parent ? ` (${zoneById(parent).name})` : ''}. Zadania czekają w ${r.start.settlement}.`, '#ffd100')
+  log(s, `${name} wakes up in ${r.start.area}${parent ? ` (${zoneById(parent).name})` : ''}. Quests await in ${r.start.settlement}.`, '#ffd100')
   return s
 }
 
@@ -56,6 +58,16 @@ export function log(s: GameState, text: string, color?: string) {
   s.log.push({ time: Date.now(), text, color })
   if (s.log.length > 150) s.log.splice(0, s.log.length - 150)
 }
+
+export const hasRacial = (h: Hero, id: RacialId) => raceById(h.race).actives.includes(id)
+function racial(s: GameState, id: RacialId, emit: Emit) {
+  const h = s.hero
+  const r = RACIAL_ACTIVE[id]
+  h.cds[id] = r.cd
+  if (r.dur) h.buffs[id] = r.dur
+  emit({ t: 'racial', name: r.name })
+}
+const racialReady = (h: Hero, id: RacialId) => hasRacial(h, id) && !(h.cds[id] > 0)
 
 export function learnableCount(h: Hero) {
   let n = 0
@@ -69,7 +81,7 @@ export function learnableCount(h: Hero) {
 const dcache = new WeakMap<Hero, { key: string; d: Derived }>()
 export function stats(h: Hero): Derived {
   const temps = Object.entries(h.temp ?? {}).filter(([, v]) => v > 0).map(([k]) => k).join(',')
-  const key = `${h.level}|${Object.values(h.equip).map((i) => i?.id).join(',')}|${(h.buffs.bloodfury ?? 0) > 0}|${(h.buffs.stoneform ?? 0) > 0}|${(h.buffs.berserking ?? 0) > 0}|${Object.values(h.trained).join(',')}|${JSON.stringify(h.talents)}|${JSON.stringify(h.disabled)}|${h.form}|${temps}|${(h.totems ?? []).map((t) => t.id).join('.')}|${h.wellFed && h.wellFed.left > 0 ? h.wellFed.name : ''}|${JSON.stringify(h.choice)}`
+  const key = `${h.level}|${Object.values(h.equip).map((i) => i?.id).join(',')}|${(h.buffs.bloodfury ?? 0) > 0}|${(h.buffs.stoneform ?? 0) > 0}|${(h.buffs.berserking ?? 0) > 0}|${Object.values(h.trained).join(',')}|${JSON.stringify(h.talents)}|${JSON.stringify(h.disabled)}|${h.form}|${temps}|${(h.totems ?? []).map((t) => t.id).join('.')}|${h.wellFed && h.wellFed.left > 0 ? h.wellFed.name : ''}|${JSON.stringify(h.choice)}|${Object.values(h.equip).map((i) => (i?.dur === 0 ? 'x' : '')).join('')}|${(h.buffs.perception ?? 0) > 0}|${h.stacks?.berserk ?? 0}`
   const c = dcache.get(h)
   if (c && c.key === key) return c.d
   const d = derive(h)
@@ -110,7 +122,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
   for (const k in h.cds) if (h.cds[k] > 0) h.cds[k] -= dt
   for (const k in h.buffs) if (h.buffs[k] > 0) h.buffs[k] -= dt
   for (const k in h.temp) if (h.temp[k] > 0) h.temp[k] -= dt
-  if (h.wellFed) { h.wellFed.left -= dt; if (h.wellFed.left <= 0) { h.wellFed = null; log(s, 'Well Fed minął.', '#aaaaaa') } }
+  if (h.wellFed) { h.wellFed.left -= dt; if (h.wellFed.left <= 0) { h.wellFed = null; log(s, 'Well Fed has worn off.', '#aaaaaa') } }
   h.sinceCast += dt
   h.gcd = Math.max(0, h.gcd - dt)
 
@@ -151,13 +163,34 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
       if (!s.mob) { s.phase = 'walk'; s.phaseT = 1; break }
       fight(s, d, dt, rng, emit)
       break
+    case 'heal': {
+      // leczenie czarem po walce (Holy Light, Healing Wave, Heal...): widać pasek rzucania i leczenie
+      if (h.casting) {
+        h.casting.left -= dt * d.haste
+        if (h.casting.left <= 0) {
+          const a = classById(h.cls).abilities.find((x) => x.id === h.casting!.id)!
+          h.casting = null
+          castHeal(h, d, a, emit)
+          h.gcd = 1.5
+        }
+        break
+      }
+      if (h.gcd > 0) break
+      const a = h.hp < d.maxHp * 0.9 ? pickHeal(h, d) : null
+      if (!a) { afterFight(s, d, rng, emit); break }
+      const ct = castTime(h, d, a)
+      emit({ t: 'cast', ability: a.name, school: a.school, kind: a.kind })
+      if (ct > 0) h.casting = { id: a.id, left: ct, total: ct }
+      else { castHeal(h, d, a, emit); h.gcd = 1.5 }
+      break
+    }
     case 'rest': {
       // bez jedzenia i picia odpoczynek trwa dużo dłużej
       const race = 1 + (raceById(h.race).mods.regenPct ?? 0)
       const e = h.eating
       const eat = e && e.left > 0
       // klasy z leczeniem leczą się czarem po walce (talenty leczenia skracają odpoczynek)
-      const selfHeal = healerRest(h, d)
+      const selfHeal = 0
       h.hp = Math.min(d.maxHp, h.hp + (d.maxHp * (0.018 * race + selfHeal) + (eat ? e!.hp : 0)) * dt)
       if (d.res === 'mana') h.res = Math.min(d.maxRes, h.res + (d.maxRes * 0.02 + (eat ? e!.mana : 0)) * dt)
       if (e) e.left -= dt
@@ -180,6 +213,15 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
       h.totems = []
       regenOut(h, d, dt, 0.05)
       s.phaseT -= dt
+      // mapy po drodze odkrywają się, gdy przez nie przechodzisz
+      if (s.trip?.path) {
+        const el = s.trip.total - s.phaseT
+        for (const w of s.trip.path) if (w.at <= el && w.zone !== s.trip.dest?.zone && !s.unlocked.includes(w.zone)) {
+          s.unlocked.push(w.zone)
+          progOf(s, w.zone)
+          log(s, `Discovered on the way: ${zoneById(w.zone).name} (${zoneById(w.zone).min}-${zoneById(w.zone).max})`, '#69ccf0')
+        }
+      }
       if (s.phaseT <= 0) arrive(s, emit)
       break
   }
@@ -187,6 +229,29 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
 
 function regenOut(h: Hero, d: Derived, dt: number, pct: number) {
   h.hp = Math.min(d.maxHp, h.hp + d.maxHp * pct * dt * (1 + (raceById(h.race).mods.regenPct ?? 0)))
+}
+
+// Czar leczący do użycia po walce: znany, włączony, gotowy, na który stać postać (mana > 25%)
+function pickHeal(h: Hero, d: Derived): Ability | null {
+  if (d.res !== 'mana' || h.res < d.maxRes * 0.25) return null
+  const g = grants(h)
+  const miss = d.maxHp - h.hp
+  const list = classById(h.cls).abilities.filter((a) => a.kind === 'heal' && !a.healPct && active(h, a, g) && !(h.cds[a.id] > 0) && h.res >= costOf(h, a, d))
+  if (!list.length) return null
+  // najmniejsze leczenie, które pokrywa brak zdrowia; inaczej najmocniejsze
+  const amt = (a: Ability) => healAmount(h, d, a)
+  const fit = list.filter((a) => amt(a) >= miss * 0.8).sort((a, b) => amt(a) - amt(b))
+  return fit[0] ?? list.sort((a, b) => amt(b) - amt(a))[0]
+}
+export function healAmount(h: Hero, d: Derived, a: Ability) {
+  const bp = basePower(a.talent ? h.level : Math.min(h.level, h.trained[a.id] ?? h.level))
+  return spellValue(d, bp, a.power ?? 1, spCoef(a)) * (1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0))
+}
+function castHeal(h: Hero, d: Derived, a: Ability, emit: Emit) {
+  h.res = Math.max(0, h.res - costOf(h, a, d))
+  h.sinceCast = 0
+  if (a.cd) h.cds[a.id] = cdOf(a, d)
+  heal(h, d, healAmount(h, d, a), emit, a.name)
 }
 
 // Leczenie poza walką: % max HP na sekundę dla klas, które znają czar leczący
@@ -212,8 +277,33 @@ function consume(h: Hero, idx: number) {
   else h.inv[idx] = null
   return it
 }
+// Naprawa zepsutych przedmiotów zestawem z toreb (jak jedzenie: postać robi to sama przy odpoczynku)
+let lastKitWarn = -1e9
+function kitRepair(s: GameState) {
+  const h = s.hero
+  const broken = Object.values(h.equip).filter((it): it is Item => !!it && it.dur === 0)
+  if (!broken.length) return
+  const fixed: string[] = []
+  let missing = false
+  for (const it of broken) {
+    // najtańszy zestaw, który wystarczy na poziom przedmiotu
+    let best = -1
+    h.inv.forEach((x, i) => { if (x?.kit && x.kit >= it.ilvl && (best < 0 || x.kit < h.inv[best]!.kit!)) best = i })
+    if (best < 0) { missing = true; continue }
+    consume(h, best)
+    delete it.dur
+    fixed.push(it.name)
+  }
+  if (fixed.length) { log(s, `Repaired with a kit: ${fixed.join(', ')}.`, '#c0c0ff'); dcache.delete(h) }
+  if (missing && s.totals.played - lastKitWarn > 300) {
+    lastKitWarn = s.totals.played
+    log(s, 'Broken gear and no suitable repair kit in your bags. Buy one from a vendor (or repair everything there).', '#ff9040')
+  }
+}
+
 function startRest(s: GameState, d: Derived) {
   const h = s.hero
+  kitRepair(s)
   const needHp = h.hp < d.maxHp * 0.9
   const needMana = d.res === 'mana' && h.res < d.maxRes * 0.9
   h.eating = { hp: 0, mana: 0, left: 15 }
@@ -221,7 +311,7 @@ function startRest(s: GameState, d: Derived) {
   if (needHp) {
     const i = bestFood(h, 'food')
     if (i >= 0) h.eating.hp = Math.max(consume(h, i).food!.amt * 1.3, d.maxHp * 0.3) / 15
-    else if (raceById(h.race).active === 'cannibalize' && !(h.cds.cannibalize > 0)) { h.eating.hp = (d.maxHp * 0.35) / 10; h.cds.cannibalize = 120 }
+    else if (racialReady(h, 'cannibalize')) { h.eating.hp = (d.maxHp * 0.35) / 10; h.cds.cannibalize = 120 }
     else missing = true
   }
   if (needMana) {
@@ -231,7 +321,7 @@ function startRest(s: GameState, d: Derived) {
   }
   if (missing && s.totals.played - lastFoodWarn > 300) {
     lastFoodWarn = s.totals.played
-    log(s, `Brak ${needHp && needMana ? 'jedzenia i picia' : needHp ? 'jedzenia' : 'picia'} w torbach: odpoczynek trwa dłużej. Kupisz je u kupca w stolicy.`, '#ff9040')
+    log(s, `No ${needHp && needMana ? 'food or drink' : needHp ? 'food' : 'drink'} in your bags: resting takes longer. Buy some from a vendor.`, '#ff9040')
   }
 }
 // Jedzenie z buffem (klik w torbie): jeden Well Fed naraz
@@ -239,9 +329,9 @@ export function useItem(s: GameState, idx: number): string | null {
   const h = s.hero
   const it = h.inv[idx]
   if (!it?.food) return null
-  if (it.food.lvl > h.level) return `Wymaga poziomu ${it.food.lvl}.`
-  if (it.food.kind !== 'buff') return 'Postać sama je i pije podczas odpoczynku.'
-  if (s.phase === 'fight') return 'Nie możesz jeść w walce.'
+  if (it.food.lvl > h.level) return `Requires level ${it.food.lvl}.`
+  if (it.food.kind !== 'buff') return 'Your character eats and drinks automatically while resting.'
+  if (s.phase === 'fight') return 'You can\'t eat in combat.'
   consume(h, idx)
   h.wellFed = { name: it.name, fx: it.food.buff!.fx, left: WELL_FED }
   log(s, `${it.name}: Well Fed (${it.food.buff!.text}, 15 min).`, '#40ff40')
@@ -264,9 +354,9 @@ function totemTick(s: GameState, d: Derived, dt: number, emit: Emit) {
     const bp = basePower(Math.min(h.level, h.trained[a.id] ?? h.level))
     if (a.tick.power && s.phase === 'fight' && s.mob && s.mob.dist <= 0) {
       const n = a.aoe ? Math.min(3, aliveOf(s.mob)) : 1
-      hitMob(s, d, bp * a.tick.power * d.spellMult * dmgMult(d, a, false) * n, false, emit, a.school ?? 'fire', a.name)
+      hitMob(s, d, spellValue(d, bp, a.tick.power, spCoef(a)) * dmgMult(d, a, false) * n, false, emit, a.school ?? 'fire', a.name)
     }
-    if (a.tick.heal) heal(h, d, bp * a.tick.heal * d.spellMult * (1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)), emit, a.name)
+    if (a.tick.heal) heal(h, d, spellValue(d, bp, a.tick.heal, spCoef(a)) * (1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)), emit, a.name)
     if (a.tick.mana && d.res === 'mana') h.res = Math.min(d.maxRes, h.res + d.maxRes * a.tick.mana * (1 + (d.m[`ab:${a.id}`] ?? 0)))
   }
   h.totems = h.totems.filter((t) => t.left > 0)
@@ -305,13 +395,16 @@ export function bossState(s: GameState) {
   const frontier = s.loc.sub === p.cleared && p.cleared < n
   const need = killsNeeded(s.loc.zone, s.loc.sub)
   const lvl = bossLevel(s.loc.zone, s.loc.sub)
-  return { frontier, need, kills: Math.min(need, p.kills), full: p.kills >= need, lvl }
+  // po przegranej z bossem wraca on dopiero po chwili (postęp zostaje, a ty zbierasz doświadczenie)
+  const wait = Math.max(0, (p.bossAt ?? 0) - s.totals.played)
+  return { frontier, need, kills: Math.min(need, p.kills), full: p.kills >= need && wait <= 0, wait, lvl }
 }
 
 export const aliveOf = (m: MobState) => Math.max(1, Math.min(m.count, Math.ceil(m.hp / m.per - 1e-6)))
 
 function spawn(s: GameState, rng: Rng, emit: Emit) {
   const h = s.hero
+  kitRepair(s) // między walkami: zepsuty przedmiot naprawiany zestawem z toreb
   const zoneId = s.loc.zone
   const z = zoneById(zoneId)
   const sub = s.loc.sub
@@ -328,7 +421,7 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
     const hp = Math.round(ms.hp * (zoneBoss ? 3.6 : 2.4))
     s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini', dist, dist0: dist, cc: 0, slow: 0 }
     emit({ t: 'spawn', mob: look.name, lvl: b.lvl, boss: s.mob.boss })
-    log(s, `${zoneBoss ? 'BOSS' : 'Miniboss'}: ${look.name} (${b.lvl}) wychodzi do walki!`, '#ff8040')
+    log(s, `${zoneBoss ? 'BOSS' : 'Miniboss'}: ${look.name} (${b.lvl}) steps out to fight!`, '#ff8040')
   } else {
     const [name, type, color] = rng.pick(subMobs(zoneId, sub))
     const { lo, hi } = subLevels(zoneId, sub)
@@ -347,10 +440,46 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
   h.heroDodged = false
   h.sinceCast = Math.min(h.sinceCast, 99)
   fightT = 0
-  const ready = (k: string) => !(h.cds[k] > 0)
-  if (r.active === 'bloodfury' && ready('bloodfury')) { h.buffs.bloodfury = 15; h.cds.bloodfury = 120; emit({ t: 'racial', name: 'Blood Fury' }) }
-  if (r.active === 'berserking' && ready('berserking')) { h.buffs.berserking = 10; h.cds.berserking = 180; emit({ t: 'racial', name: 'Berserking' }) }
-  if (r.active === 'warstomp' && ready('warstomp') && s.mob) { s.mob.stun = 2; h.cds.warstomp = 120; emit({ t: 'racial', name: 'War Stomp' }) }
+  void r
+  if (racialReady(h, 'bloodfury')) racial(s, 'bloodfury', emit)
+  if (racialReady(h, 'berserking')) {
+    // Classic: 10% przy pełnym zdrowiu do 30% przy niskim
+    const d0 = stats(h)
+    h.stacks.berserk = Math.round((0.1 + 0.2 * Math.max(0, 1 - h.hp / d0.maxHp)) * 100) / 100
+    racial(s, 'berserking', emit)
+  }
+  if (racialReady(h, 'perception') && s.mob && (s.mob.boss || s.mob.count >= 3)) racial(s, 'perception', emit)
+}
+
+// Wróg dochodzi do zwarcia: War Stomp (tauren), Escape Artist (gnom rzucający czary)
+function onContact(s: GameState, emit: Emit) {
+  const h = s.hero
+  const mob = s.mob
+  if (!mob) return
+  if (racialReady(h, 'warstomp')) { mob.stun = Math.max(mob.stun, 2); racial(s, 'warstomp', emit) }
+  else if (racialReady(h, 'escape') && styleOf(h) === 'caster') { mob.dist = 2; racial(s, 'escape', emit) }
+}
+// Czy postać teraz bije białymi atakami (także caster bez many albo z wyłączonymi czarami)
+export function autoAttacking(s: GameState) {
+  const h = s.hero
+  if (s.phase !== 'fight' || !s.mob || h.casting) return false
+  const style = styleOf(h)
+  const d = stats(h)
+  const lowMana = d.res === 'mana' && h.res < d.maxRes * 0.12
+  return (style !== 'caster' || lowMana || lastNoAction) && (style === 'ranged' || s.mob.dist <= 0)
+}
+
+// Czy postać walczy teraz wręcz. Łowca: pupil trzyma wroga, a łowca strzela; bez pupila (albo w stylu
+// "Wręcz") przy wrogu w zwarciu przechodzi na broń do walki wręcz.
+export function heroInMelee(s: GameState) {
+  const mob = s.mob
+  if (!mob || mob.dist > 0) return false
+  const h = s.hero
+  if (h.cls !== 'hunter') return true
+  return h.mode === 'melee' || !activePet(h)
+}
+export function swingSpeed(s: GameState, d = stats(s.hero)) {
+  return s.hero.cls === 'hunter' && heroInMelee(s) ? d.melee.speed : d.weaponSpeed
 }
 
 // Hybryda = walczy wręcz, ale ma czary rzucane z dystansu (szaman, paladyn, druid w formie zwierzęcia nie)
@@ -361,6 +490,7 @@ export function isHybrid(h: Hero) {
 }
 // Czy postać od razu biegnie do wroga (brak aktywnych czarów z dystansu albo styl "Wręcz")
 function closesIn(h: Hero) {
+  if (h.cls === 'hunter') return h.mode === 'melee'
   if (styleOf(h) !== 'melee') return false
   if (h.mode === 'melee') return true
   const g = grants(h)
@@ -377,7 +507,10 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   const haste = d.haste
   fightT += dt
   if (mob.slow > 0) mob.slow -= dt
-  if (mob.dist > 0) mob.dist = Math.max(0, mob.dist - dt * (mob.slow > 0 ? 0.5 : 1))
+  if (mob.dist > 0) {
+    mob.dist = Math.max(0, mob.dist - dt * (mob.slow > 0 ? 0.5 : 1))
+    if (mob.dist <= 0) onContact(s, emit)
+  }
   if (mob.cc > 0) mob.cc -= dt
   const inMelee = mob.dist <= 0
 
@@ -426,7 +559,7 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   if ((style !== 'caster' || lowMana || lastNoAction) && !h.casting && reach) {
     h.swing -= dt * haste
     if (h.swing <= 0) {
-      h.swing += d.weaponSpeed
+      h.swing += swingSpeed(s, d)
       whiteSwing(s, d, rng, emit, style === 'caster' ? 0.6 : 1)
       if (s.mob && s.mob.hp <= 0) return onKill(s, rng, emit)
     }
@@ -458,8 +591,11 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
       } else if ((d.m.immune ?? 0) > 0) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'absorb' })
       else {
         const roll = rng.next()
+        const dodge = Math.min(0.75, d.dodge)
+        const parry = PARRY.has(h.cls) && styleOf(h) !== 'caster' ? 0.05 : 0
         if (roll < 0.05) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'miss' })
-        else if (roll < 0.05 + Math.min(0.75, d.dodge)) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'dodge' }); h.heroDodged = true }
+        else if (roll < 0.05 + dodge) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'dodge' }); h.heroDodged = true }
+        else if (roll < 0.05 + dodge + parry) { emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'parry' }); h.heroDodged = true }
         else {
           const up = Math.max(0, mob.lvl - h.level)
           let dmg = mob.dmg * attackers * (attackers > 1 ? 0.75 : 1) * (1 + 0.12 * up + 0.02 * up * up) * (0.85 + rng.next() * 0.3) * (1 - d.dr(mob.lvl))
@@ -480,16 +616,25 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
           if (s.mob && s.mob.hp <= 0) return onKill(s, rng, emit)
         }
         if ((d.m.retal ?? 0) > 0 && s.mob) {
-          hitMob(s, d, whiteHit(d, rng) * d.m.retal, false, emit, 'physical', 'Retaliation')
+          hitMob(s, d, whiteHit(d, rng, true) * d.m.retal, false, emit, 'physical', 'Retaliation')
           if (s.mob.hp <= 0) return onKill(s, rng, emit)
         }
-        const r = raceById(h.race)
-        if (r.active === 'stoneform' && h.hp < d.maxHp * 0.4 && !(h.cds.stoneform > 0)) { h.buffs.stoneform = 8; h.cds.stoneform = 180; emit({ t: 'racial', name: 'Stoneform' }) }
+        if (racialReady(h, 'stoneform') && h.hp < d.maxHp * 0.4) racial(s, 'stoneform', emit)
+        // Shadowmeld (nocny elf): ucieczka z przegranej walki
+        if (h.hp > 0 && h.hp < d.maxHp * 0.1 && racialReady(h, 'shadowmeld') && s.mob) {
+          racial(s, 'shadowmeld', emit)
+          log(s, `Shadowmeld: ${s.mob.name} loses sight of you.`, '#a58fd6')
+          s.mob = null
+          h.casting = null
+          afterFight(s, d, rng, emit)
+          return
+        }
       }
     }
   }
   if (h.hp <= 0) onDeath(s, emit)
 }
+const PARRY = new Set(['warrior', 'paladin', 'rogue', 'hunter'])
 let lastNoAction = false
 
 // Ciosy w trakcie rzucania: cofają pasek (czary) albo skracają kanał; czasem wróg przerywa czar.
@@ -499,6 +644,8 @@ function castHit(s: GameState, d: Derived, rng: Rng, emit: Emit) {
   const c = h.casting
   const mob = s.mob
   if (!c || !mob) return
+  if ((h.buffs.wotf ?? 0) > 0) return // Will of the Forsaken: bez przerywania i cofania
+  if (racialReady(h, 'wotf')) { racial(s, 'wotf', emit); return }
   const resist = Math.min(0.9, d.m.pushback ?? 0)
   const a = classById(h.cls).abilities.find((x) => x.id === c.id)
   const kick = (mob.type === 'humanoid' ? 0.08 : mob.boss ? 0.06 : 0) * (1 - resist)
@@ -520,17 +667,36 @@ function castHit(s: GameState, d: Derived, rng: Rng, emit: Emit) {
 
 const sweepMul = (s: GameState, d: Derived) => ((d.m.sweep ?? 0) > 0 && s.mob && aliveOf(s.mob) >= 2 ? 1.5 : 1)
 
+// Tabela ataku bronią (Classic): pudło / unik / parowanie / cios ześlizgujący się / krytyk / trafienie.
+// Zwraca mnożnik obrażeń (0 = chybienie) i czy był krytyk; przy okazji ćwiczy umiejętność broni.
+function weaponRoll(s: GameState, d: Derived, rng: Rng, emit: Emit, ranged: boolean, white: boolean, ability?: string, extraCrit = 0): { mul: number; crit: boolean; glance: boolean } {
+  const h = s.hero
+  const mob = s.mob!
+  const up = trySkillUp(h, ranged, rng)
+  if (up) {
+    emit({ t: 'skillup', weapon: up.type, skill: up.skill })
+    if (up.skill % 5 === 0 || up.skill >= h.level * 5) log(s, `${up.type} skill: ${up.skill}/${h.level * 5}.`, '#8080ff')
+  }
+  const tb = attackTable(h, mob.lvl, ranged, white, d.m.hit ?? 0, mob.stun > 0)
+  let roll = rng.next()
+  if ((roll -= tb.miss) < 0) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability }); return { mul: 0, crit: false, glance: false } }
+  if ((roll -= tb.dodge) < 0) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'dodge', ability }); mob.dodged = true; return { mul: 0, crit: false, glance: false } }
+  if ((roll -= tb.parry) < 0) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'parry', ability }); return { mul: 0, crit: false, glance: false } }
+  if ((roll -= tb.glance) < 0) return { mul: tb.glanceMul, crit: false, glance: true }
+  const crit = rng.chance(d.crit + tb.crit + extraCrit)
+  return { mul: 1, crit, glance: false }
+}
+
 function whiteSwing(s: GameState, d: Derived, rng: Rng, emit: Emit, mult: number) {
   const h = s.hero
   const mob = s.mob!
-  const roll = rng.next()
-  const miss = missChance(d, Math.max(0, mob.lvl - h.level), false)
-  if (roll < miss) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss' }); return }
-  if (roll < miss + 0.05) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'dodge' }); mob.dodged = true; return }
-  const crit = rng.chance(d.crit)
-  let dmg = whiteHit(d, rng) * (crit ? 2 + (d.m.critDmg ?? 0) : 1) * mult * dmgMult(d, null, true) * sweepMul(s, d)
+  const ranged = styleOf(h) === 'ranged' && !heroInMelee(s)
+  const w = weaponRoll(s, d, rng, emit, ranged, true)
+  if (!w.mul) return
+  const crit = w.crit
+  let dmg = whiteHit(d, rng, !ranged) * w.mul * (crit ? 2 + (d.m.critDmg ?? 0) : 1) * mult * dmgMult(d, null, true) * sweepMul(s, d)
   if (h.race === 'troll' && BEASTS.has(mob.type)) dmg *= 1.05
-  hitMob(s, d, dmg, crit, emit, 'physical')
+  hitMob(s, d, dmg, crit, emit, 'physical', undefined, 'hero', w.glance)
   if (d.res === 'rage') h.res = Math.min(100, h.res + ((7.5 * dmg) / rageConv(h.level) / (crit ? 2 : 1)) * (1 + (d.m.resGen ?? 0)))
   maelstrom(h, d, rng)
   procs(s, d, rng, emit, 'hit')
@@ -551,29 +717,30 @@ function procs(s: GameState, d: Derived, rng: Rng, emit: Emit, on: 'hit' | 'take
     if (!rng.chance(a.proc.chance)) continue
     if (a.proc.extra) { whiteSwingNoProc(s, d, rng, emit); continue }
     const bp = basePower(Math.min(h.level, h.trained[a.id] ?? h.level))
-    if (a.proc.heal) heal(h, d, bp * a.proc.heal * d.spellMult, emit, a.name)
+    if (a.proc.heal) heal(h, d, spellValue(d, bp, a.proc.heal, spCoef(a)), emit, a.name)
     if (a.proc.mana && d.res === 'mana') h.res = Math.min(d.maxRes, h.res + d.maxRes * a.proc.mana)
-    if (a.proc.power > 0) hitMob(s, d, bp * a.proc.power * d.spellMult * dmgMult(d, a, false), false, emit, a.school ?? 'physical', a.name)
+    if (a.proc.power > 0) hitMob(s, d, spellValue(d, bp, a.proc.power, spCoef(a)) * dmgMult(d, a, false), false, emit, a.school ?? 'physical', a.name)
     if (!s.mob || s.mob.hp <= 0) return
   }
 }
 function whiteSwingNoProc(s: GameState, d: Derived, rng: Rng, emit: Emit) {
   const crit = rng.chance(d.crit)
-  hitMob(s, d, whiteHit(d, rng) * (crit ? 2 : 1) * dmgMult(d, null, true) * (1 + (d.m['ab:windfury'] ?? 0)), crit, emit, 'physical', 'Windfury')
+  hitMob(s, d, whiteHit(d, rng, true) * (crit ? 2 : 1) * dmgMult(d, null, true) * (1 + (d.m['ab:windfury'] ?? 0)), crit, emit, 'physical', 'Windfury')
 }
 
-function whiteHit(d: Derived, rng: Rng) {
+function whiteHit(d: Derived, rng: Rng, melee = false) {
+  if (melee) return (d.melee.dps + d.melee.ap / 14) * d.melee.speed * (0.85 + rng.next() * 0.3)
   return (d.weaponDps + d.ap / 14) * d.weaponSpeed * (0.85 + rng.next() * 0.3)
 }
 
-function hitMob(s: GameState, d: Derived, amt: number, crit: boolean, emit: Emit, school: Ability['school'], ability?: string, src: 'hero' | 'pet' = 'hero') {
+function hitMob(s: GameState, d: Derived, amt: number, crit: boolean, emit: Emit, school: Ability['school'], ability?: string, src: 'hero' | 'pet' = 'hero', glance = false) {
   const mob = s.mob
   if (!mob) return
   const up = Math.max(0, mob.lvl - s.hero.level)
   const a = Math.max(1, Math.round(amt * Math.max(0.4, 1 - 0.05 * up)))
   const before = aliveOf(mob)
   mob.hp -= a
-  emit({ t: 'dmg', src, amt: a, crit, school, ability })
+  emit({ t: 'dmg', src, amt: a, crit, school, ability, glance: glance || undefined })
   if (school === 'shadow' && (d.m.lifesteal ?? 0) > 0) heal(s.hero, d, a * d.m.lifesteal, () => {})
   const after = mob.hp > 0 ? aliveOf(mob) : 0
   for (let i = after; i < before; i++) if (after > 0) emit({ t: 'subkill', mob: mob.name })
@@ -667,7 +834,7 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
 const KIND_PRIO: Record<string, number> = { heal: 8, shield: 10, stun: 12, regen: 6, lifetap: 6, totem: 4, cooldown: 14, execute: 16, finisher: 25, dot: 36, drain: 45, hot: 9, strike: 60, spell: 60 }
 function defaults(a: Ability): Cond[] {
   switch (a.kind) {
-    case 'heal': return ['hp<45']
+    case 'heal': return ['hp<50']
     case 'hot': return ['hp<75', 'noHot']
     case 'shield': return ['noShield']
     case 'dot': return ['noDot', 'mob>30']
@@ -691,6 +858,7 @@ function rotation(s: GameState, d: Derived): Ability | null {
   const shadowform = (d.m['school:shadow'] ?? 0) >= 0.15 && !h.disabled.shadowform && g.has('shadowform')
   const missing = missingTotems(h, g)
   const melee = styleOf(h) === 'melee'
+  const engaged = heroInMelee(s)
   let best: Ability | null = null
   let bestP = Infinity
   let bestScore = -1
@@ -698,7 +866,9 @@ function rotation(s: GameState, d: Derived): Ability | null {
     if (a.kind === 'buff' || a.kind === 'proc' || a.kind === 'form' || a.kind === 'summon') continue
     if (!active(h, a, g)) continue
     if (h.cds[a.id] > 0) continue
-    if (mob.dist > 0 && isMelee(a) && !a.closes) continue // poza zasięgiem zwarcia
+    if (!engaged && isMelee(a) && !a.closes) continue // poza zasięgiem zwarcia
+    // łowca w zwarciu nie strzela (martwa strefa jak w Classicu): tylko ciosy wręcz i pułapki
+    if (h.cls === 'hunter' && engaged && !isMelee(a) && (a.kind === 'spell' || a.kind === 'dot' || a.kind === 'drain')) continue
     if (a.closes && mob.dist <= 0) continue
     if (shadowform && a.school === 'holy' && a.kind !== 'heal' && a.kind !== 'shield' && a.kind !== 'hot') continue
     // styl walki hybrydy: w zwarciu (albo zawsze w stylu "Wręcz") bez czarów rzucanych dłużej niż natychmiast
@@ -712,7 +882,11 @@ function rotation(s: GameState, d: Derived): Ability | null {
       const fin = h.cp >= 5 || (h.cp >= 3 && (mob.hp / mob.maxHp < 0.3 || h.level < 10)) || (h.cp >= 1 && mob.hp / mob.maxHp < 0.08)
       if (!fin) continue
     }
-    let p = a.prio ?? KIND_PRIO[a.kind] ?? 60
+    // natychmiastowy czar z DoT-em (Moonfire, Flame Shock): nie odnawiaj, dopóki DoT jest na wrogu
+    const instantDot = a.kind === 'spell' && !!a.dot && !(a.cast ?? 0)
+    if (instantDot && mob.dots.some((x) => x.id === a.id)) continue
+    if (a.kind === 'finisher' && a.buff && (h.temp[a.id] ?? 0) > 0) continue
+    let p = a.prio ?? (instantDot ? KIND_PRIO.dot : KIND_PRIO[a.kind]) ?? 60
     // pełny Maelstrom: natychmiastowy Lightning Bolt; 4 ładunki Arcane Blast: Arcane Missiles
     const special = (a.id === 'lightning_bolt' && (h.stacks.mw ?? 0) >= 5) || (a.id === 'arcane_missiles' && (h.stacks.ab ?? 0) >= 4)
     if (special) p = 5
@@ -756,9 +930,11 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
 
   switch (a.kind) {
     case 'strike': {
-      if (rng.chance(missChance(d, up, false))) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: a.name }); return }
-      const crit = rng.chance(d.crit + (a.buff?.crit ?? 0))
-      const base = a.school && a.school !== 'physical' ? whiteHit(d, rng) * 0.5 + bp * 0.6 * d.spellMult : whiteHit(d, rng) * 0.55 + bp * 0.55
+      const w = weaponRoll(s, d, rng, emit, !isMelee(a) && styleOf(h) === 'ranged', false, a.name, a.buff?.crit ?? 0)
+      if (!w.mul) return
+      const crit = w.crit
+      const mw = isMelee(a)
+      const base = a.school && a.school !== 'physical' ? whiteHit(d, rng, mw) * 0.5 + spellValue(d, bp, 0.6, spCoef(a)) : whiteHit(d, rng, mw) * 0.55 + bp * 0.55
       hitMob(s, d, base * (a.power ?? 1) * (crit ? critMul(true) : 1) * mult * aoeN * (a.aoe ? 1 : sweepMul(s, d)), crit, emit, a.school, a.name)
       if (a.heal) heal(h, d, d.maxHp * a.heal, emit, a.name)
       if (a.cp) h.cp = Math.min(5, h.cp + a.cp)
@@ -792,18 +968,20 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
     }
     case 'spell': case 'drain': {
       if (a.buff && a.dur) h.temp[a.id] = a.dur // Drain Hope
-      if (spellMiss()) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: a.name }); return }
+      let wr: { mul: number; crit: boolean } | null = null
+      if (phys) { wr = weaponRoll(s, d, rng, emit, !isMelee(a), false, a.name, a.buff?.crit ?? 0); if (!wr.mul) return } // strzały i ciosy fizyczne: tabela broni
+      else if (spellMiss()) { emit({ t: 'dmg', src: 'hero', amt: 0, miss: 'miss', ability: a.name }); return }
       let stack = 1
       if (a.id === 'arcane_blast') { stack = 1 + 0.15 * (h.stacks.ab ?? 0); h.stacks.ab = Math.min(4, (h.stacks.ab ?? 0) + 1) }
       if (a.id === 'arcane_missiles') { stack = 1 + 0.15 * (h.stacks.ab ?? 0); h.stacks.ab = 0 }
       if (a.id === 'lightning_bolt') h.stacks.mw = 0
-      const crit = rng.chance((phys ? d.crit : d.spellCrit) + (a.buff?.crit ?? 0))
-      const base = phys ? whiteHit(d, rng) * 0.8 + bp * 0.4 : bp * d.spellMult * (0.92 + rng.next() * 0.16)
+      const crit = wr ? wr.crit : rng.chance(d.spellCrit + (a.buff?.crit ?? 0))
+      const base = phys ? whiteHit(d, rng) * 0.8 + bp * 0.4 : (bp * (a.power ?? 1) * d.spellMult * (0.92 + rng.next() * 0.16) + d.sp * spCoef(a)) / Math.max(0.01, a.power ?? 1)
       const dmg = base * (a.power ?? 1) * (crit ? critMul(phys) : 1) * mult * aoeN * stack
       hitMob(s, d, dmg, crit, emit, a.school, a.name)
       if (a.heal) heal(h, d, dmg * a.heal, emit, a.name)
       if (a.dot && s.mob) {
-        const total = bp * a.dot.power * d.spellMult * mult
+        const total = spellValue(d, bp, a.dot.power, spCoef(a, 'dot') * 0.5) * mult
         const ticks = Math.max(1, Math.round(a.dot.dur / 3))
         s.mob.dots = s.mob.dots.filter((x) => x.id !== a.id)
         s.mob.dots.push({ id: a.id, name: a.name, school: a.school ?? 'fire', perTick: total / ticks, left: a.dot.dur, tickIn: 3 })
@@ -815,7 +993,7 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
       return
     }
     case 'dot': {
-      const total = bp * (a.power ?? 1) * d.spellMult * mult * aoeN
+      const total = (a.school === 'physical' ? bp * (a.power ?? 1) * d.spellMult + d.ap * 0.1 * (a.dur ?? 12) / 3 : spellValue(d, bp, a.power ?? 1, spCoef(a))) * mult * aoeN
       const ticks = Math.max(1, Math.round((a.dur ?? 12) / 3))
       mob.dots = mob.dots.filter((x) => x.id !== a.id)
       mob.dots.push({ id: a.id, name: a.name, school: a.school ?? 'shadow', perTick: total / ticks, left: a.dur ?? 12, tickIn: 3 })
@@ -825,19 +1003,18 @@ function resolve(s: GameState, a: Ability, d: Derived, rng: Rng, emit: Emit) {
     }
     case 'heal': {
       if (a.healPct) { heal(h, d, d.maxHp * a.healPct, emit, a.name); return }
-      const hm = 1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)
-      heal(h, d, bp * (a.power ?? 1) * d.spellMult * hm, emit, a.name)
+      heal(h, d, healAmount(h, d, a), emit, a.name)
       return
     }
     case 'hot': {
       const ticks = Math.max(1, Math.round((a.dur ?? 12) / 3))
       const hm = 1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)
-      h.hot = { perTick: (bp * (a.power ?? 1) * d.spellMult * hm) / ticks, left: a.dur ?? 12, tickIn: 3 }
-      if (a.id === 'riptide') heal(h, d, bp * 1.2 * d.spellMult * hm, emit, a.name)
+      h.hot = { id: a.id, name: a.name, perTick: (spellValue(d, bp, a.power ?? 1, spCoef(a)) * hm) / ticks, left: a.dur ?? 12, tickIn: 3 }
+      if (a.id === 'riptide') heal(h, d, spellValue(d, bp, 1.2, 0.43) * hm, emit, a.name)
       return
     }
     case 'shield':
-      h.shield = a.shieldPct ? d.maxHp * a.shieldPct : bp * (a.power ?? 1) * d.spellMult * (1 + (d.m.shield ?? 0))
+      h.shield = a.shieldPct ? d.maxHp * a.shieldPct : spellValue(d, bp, a.power ?? 1, spCoef(a)) * (1 + (d.m.shield ?? 0))
       return
     case 'stun':
       if (a.cc) { if (aliveOf(mob) >= 2) mob.cc = Math.max(mob.cc, a.dur ?? 6) }
@@ -912,7 +1089,7 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
       if (q.have === before) continue
     } else q.have = Math.min(q.need, q.have + mob.count)
     emit({ t: 'questprog', quest: q })
-    if (q.have >= q.need) { emit({ t: 'questdone', quest: q }); log(s, `Zadanie gotowe do oddania: ${q.title}`, '#ffd100') }
+    if (q.have >= q.need) { emit({ t: 'questdone', quest: q }); log(s, `Quest ready to turn in: ${q.title}`, '#ffd100') }
   }
 
   const p = progOf(s)
@@ -922,12 +1099,14 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
     const sz = subs[s.loc.sub]
     p.cleared = Math.max(p.cleared, s.loc.sub + 1)
     p.kills = 0
+    p.bossFails = 0
+    p.bossAt = 0
     emit({ t: 'cleared', zone: s.loc.zone, sub: s.loc.sub, boss: mob.name, zoneBoss: sz.zoneBoss })
     if (sz.zoneBoss) {
       const r = routeZones(s)
       const next = r[r.indexOf(s.loc.zone) + 1]
-      log(s, `${mob.name} pokonany! ${zoneById(s.loc.zone).name} ukończona.`, '#ff8040')
-      if (next) log(s, `Następna mapa na trasie: ${zoneById(next).name} (${zoneById(next).min}-${zoneById(next).max})`, '#69ccf0')
+      log(s, `${mob.name} defeated! ${zoneById(s.loc.zone).name} completed.`, '#ff8040')
+      if (next) log(s, `Next zone on your route: ${zoneById(next).name} (${zoneById(next).min}-${zoneById(next).max})`, '#69ccf0')
       if (next && s.autoAdvance) { moveTo(s, next, 0, emit, true); return }
     } else {
       log(s, `${mob.name} pokonany! Odblokowano: ${subs[s.loc.sub + 1].name}`, '#ff8040')
@@ -938,10 +1117,16 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
   }
 
   const d = stats(h)
+  // klasy z leczeniem najpierw leczą się czarem, a jedzą dopiero, gdy brakuje many
+  if (h.hp < d.maxHp * 0.8 && pickHeal(h, d)) { s.phase = 'heal'; return }
+  afterFight(s, d, rng, emit)
+}
+function afterFight(s: GameState, d: Derived, rng: Rng, emit: Emit) {
+  const h = s.hero
   const needRest = h.hp < d.maxHp * 0.55 || (d.res === 'mana' && h.res < d.maxRes * 0.35)
   if (needRest) {
     s.phase = 'rest'
-    if (raceById(h.race).active === 'cannibalize' && h.hp < d.maxHp * 0.5 && !(h.cds.cannibalize > 0) && bestFood(h, 'food') < 0) emit({ t: 'racial', name: 'Cannibalize' })
+    if (racialReady(h, 'cannibalize') && h.hp < d.maxHp * 0.5 && bestFood(h, 'food') < 0) emit({ t: 'racial', name: 'Cannibalize' })
     startRest(s, d)
   } else { s.phase = 'walk'; s.phaseT = 2.5 + rng.next() * 2.5 }
 }
@@ -955,7 +1140,7 @@ export function travelForm(h: Hero): { name: string; speed: number } | null {
 }
 export function tripPlan(s: GameState, zone: string, sub: number, auto = false) {
   const form = travelForm(s.hero)
-  const p = planTrip(s.hero.faction, s.loc.zone, zone, form?.speed ?? 0, auto)
+  const p = planTrip(s.hero.faction, s.loc.zone, zone, (form?.speed ?? 0) + (raceById(s.hero.race).mods.travelPct ?? 0), auto)
   const fromName = `${zoneById(s.loc.zone).name}${s.where === 'field' ? `: ${subOf(s).name}` : ''}`
   const toName = `${zoneById(zone).name}: ${subsOf(zone)[sub].name}`
   return { ...p, form: form?.name, fromName, toName }
@@ -963,6 +1148,8 @@ export function tripPlan(s: GameState, zone: string, sub: number, auto = false) 
 export const isTraveling = (s: GameState) => s.phase === 'travel' && !!s.trip
 
 function startTrip(s: GameState, trip: GameState['trip'], secs: number) {
+  // duch nie podróżuje za darmo: wyruszenie oznacza wskrzeszenie u Ducha Uzdrowiciela
+  spiritRes(s, noop, 'Travelling as a ghost. ')
   s.where = 'field'
   s.mob = null
   s.hero.casting = null
@@ -974,21 +1161,21 @@ function startTrip(s: GameState, trip: GameState['trip'], secs: number) {
 
 // Podróż: postać jest w drodze, a cel (i odkrycie mapy) liczy się dopiero po dotarciu
 export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noop, auto = false): string | null {
-  if (isTraveling(s)) return 'Jesteś już w podróży.'
+  if (isTraveling(s)) return 'You are already travelling.'
   const plan = tripPlan(s, zone, sub, auto)
   if (plan.blocked) return plan.blocked
-  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub } }, plan.total)
+  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub }, path: plan.path }, plan.total)
   log(s, `${plan.label || `Podróż: ${plan.fromName} → ${plan.toName}`} (${plan.total} s${plan.form ? `, ${plan.form}` : ''})`, '#69ccf0')
   return null
 }
 
 // Statek / zeppelin z portu na obecnej mapie
 export function ride(s: GameState, index: number, emit: Emit = noop): string | null {
-  if (isTraveling(s)) return 'Jesteś już w podróży.'
+  if (isTraveling(s)) return 'You are already travelling.'
   const port = portsOf(s.hero.faction, s.loc.zone).find((p) => p.i === index)
-  if (!port) return 'Z tej mapy nie odpływa ten transport.'
+  if (!port) return 'This transport does not depart from this zone.'
   const toName = `${zoneById(port.to).name}: ${subsOf(port.to)[0].name}`
-  const secs = RIDE_SECS + 10
+  const secs = port.t.secs
   startTrip(s, { kind: port.t.kind, label: port.t.label, total: secs, from: zoneById(s.loc.zone).name, to: toName, dest: { zone: port.to, sub: 0 } }, secs)
   log(s, `${port.t.label} (${secs} s)`, '#69ccf0')
   void emit
@@ -1005,7 +1192,7 @@ function arrive(s: GameState, emit: Emit) {
   s.loc = { zone: dest.zone, sub: dest.sub }
   if (!s.unlocked.includes(dest.zone)) {
     s.unlocked.push(dest.zone)
-    log(s, `Odkryto: ${zoneById(dest.zone).name} (${zoneById(dest.zone).min}-${zoneById(dest.zone).max})`, '#69ccf0')
+    log(s, `Discovered: ${zoneById(dest.zone).name} (${zoneById(dest.zone).min}-${zoneById(dest.zone).max})`, '#69ccf0')
   }
   progOf(s, dest.zone)
   if (changed) emit({ t: 'zone', zone: dest.zone })
@@ -1025,7 +1212,7 @@ export function gainXp(s: GameState, amt: number, emit: Emit) {
     if (d.res === 'mana') h.res = d.maxRes
     const learnable = learnableCount(h)
     emit({ t: 'level', level: h.level, learnable })
-    log(s, `Awans! Poziom ${h.level}.${learnable ? ` Trener ma dla ciebie ${learnable} ${learnable === 1 ? 'nową rangę' : 'nowych rang'}.` : ''}${h.level >= 10 ? ' +1 punkt talentu.' : ''}`, '#ffd100')
+    log(s, `Level up! You reached level ${h.level}.${learnable ? ` Your trainer has ${learnable} new ${learnable === 1 ? 'rank' : 'ranks'} for you.` : ''}${h.level >= 10 ? ' +1 talent point.' : ''}`, '#ffd100')
   }
   if (h.level >= MAX_LEVEL) h.xp = 0
 }
@@ -1036,10 +1223,10 @@ function addLoot(s: GameState, it: Item, emit: Emit) {
   s.totals.items++
   if (addToInv(h, it)) {
     emit({ t: 'loot', item: it, equipped: false })
-    if (it.rarity >= 2) log(s, `Łup: [${it.name}]`, ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][it.rarity])
+    if (it.rarity >= 2) log(s, `Loot: [${it.name}]`, ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][it.rarity])
   } else {
     emit({ t: 'bagsfull', item: it })
-    if (s.totals.played - lastFullWarn > 60 || it.rarity >= 2) { lastFullWarn = s.totals.played; log(s, `Torby pełne! Przepada: [${it.name}]. Sprzedaj rzeczy w stolicy.`, '#ff6060') }
+    if (s.totals.played - lastFullWarn > 60 || it.rarity >= 2) { lastFullWarn = s.totals.played; log(s, `Bags are full! Lost: [${it.name}]. Sell some items to a vendor.`, '#ff6060') }
   }
 }
 
@@ -1056,12 +1243,32 @@ function onDeath(s: GameState, emit: Emit) {
   s.phase = 'dead'
   s.phaseT = 30 * (1 - (raceById(h.race).mods.respawnPct ?? 0))
   s.totals.deaths++
-  // śmierć w podstrefie, której jeszcze nie oczyszczono = zaczynasz ją od początku
+  if (boss) { const p = progOf(s); p.bossFails = (p.bossFails ?? 0) + 1; p.bossAt = s.totals.played + Math.min(1800, BOSS_RESPAWN * 2 ** (p.bossFails - 1)) }
+  // duch biegnie do zwłok: postęp podstrefy zostaje (natychmiastowe odrodzenie u Ducha Uzdrowiciela go zeruje)
+  emit({ t: 'death', boss, reset: false })
+  log(s, `${boss ? `${boss} has defeated you.` : 'You have died.'} Your ghost runs back to your corpse (${Math.ceil(s.phaseT)} s), or resurrect now at the Spirit Healer.`, '#ff4040')
+}
+
+// Duch Uzdrowiciel (jak w Classicu): natychmiastowe wskrzeszenie na cmentarzu, ale założone przedmioty
+// tracą 25% wytrzymałości, a postęp podstrefy, w której zginąłeś, zaczyna się od nowa.
+export const SPIRIT_DUR = 0.25
+export const BOSS_RESPAWN = 240 // s: boss, który cię pokonał, wraca po 4 min (kolejne porażki: 8, 16, 30 min)
+export function spiritRes(s: GameState, emit: Emit = noop, why = ''): boolean {
+  if (s.phase !== 'dead') return false
+  const h = s.hero
+  damageGear(h, SPIRIT_DUR)
   const p = progOf(s)
   const reset = s.loc.sub === p.cleared && p.kills > 0
-  if (reset) p.kills = 0
-  emit({ t: 'death', boss, reset })
-  log(s, `${boss ? `${boss} cię pokonał.` : 'Zginąłeś.'}${reset ? ' Postęp podstrefy wyzerowany: zaczynasz od nowa.' : ''}`, '#ff4040')
+  if (reset) { p.kills = 0; p.bossAt = 0 }
+  const d = stats(h)
+  h.hp = d.maxHp * 0.5
+  if (d.res === 'mana') h.res = d.maxRes * 0.5
+  s.phase = 'rest'
+  startRest(s, d)
+  emit({ t: 'revive' })
+  const broken = Object.values(h.equip).filter((it) => it?.dur === 0).length
+  log(s, `${why}The Spirit Healer resurrects you: -25% gear durability${reset ? ', subzone progress reset' : ''}.${broken ? ` Broken items (${broken}) give no bonuses: repair them at a vendor.` : ''}`, '#a0c8ff')
+  return true
 }
 
 // ------------------------------------------------------------------ offline
@@ -1090,8 +1297,93 @@ export function simulateOffline(s: GameState, seconds: number): OfflineSummary {
     const gain = Math.min(cap - h.rested, (restSecs / (8 * 3600)) * xpToNext(h.level) * 0.05)
     if (gain > 0) { h.rested += gain; sum.restedGained = Math.round(gain) }
   }
-  if (sum.kills) log(s, `Gdy cię nie było: ${sum.kills} zabitych, +${sum.levels} poz.`, '#69ccf0')
+  if (sum.kills) log(s, `While you were away: ${sum.kills} kills, +${sum.levels} levels.`, '#69ccf0')
   return sum
 }
 
 export { resourceOf }
+
+// ------------------------------------------------------------------ opis umiejętności (tooltipy)
+// Liczone tymi samymi wzorami co walka: widełki obrażeń / leczenia i czym się skalują.
+export function abilityInfo(h: Hero, a: Ability, d = stats(h)): string[] {
+  const bp = basePower(a.talent ? h.level : Math.min(h.level, h.trained[a.id] ?? h.level))
+  const phys = a.school === 'physical' || !a.school
+  const mult = dmgMult(d, a, phys)
+  const white = (d.weaponDps + d.ap / 14) * d.weaponSpeed
+  const r = (x: number, lo = 0.92, hi = 1.08) => `${Math.round(x * lo)}–${Math.round(x * hi)}`
+  const k = spCoef(a)
+  const pc = (x: number) => `${Math.round(x * 100)}%`
+  // Classic: czary skalują się rangą (poziomem) i mocą czarów z przedmiotów; Intellect daje manę i krytyki, nie moc
+  const spellScale = (coef: number) => `rank (level ${a.talent ? h.level : Math.min(h.level, h.trained[a.id] ?? h.level)}) and spell power (${d.sp}, coefficient ${pc(coef)} = +${Math.round(d.sp * coef)})`
+  const out: string[] = []
+  const p = a.power ?? 1
+  switch (a.kind) {
+    case 'strike': {
+      const base = a.school && a.school !== 'physical' ? white * 0.5 + spellValue(d, bp, 0.6, k) : white * 0.55 + bp * 0.55
+      out.push(`Damage: ${r(base * p * mult, 0.85, 1.15)}${a.aoe ? ' to each enemy in the group' : ''}`)
+      out.push(`Scales with: weapon (${d.weaponDps.toFixed(1)} DPS), attack power (${d.ap}) and rank${a.school && a.school !== 'physical' ? `, spell power (${d.sp})` : ''}. Hit chance depends on weapon skill.`)
+      break
+    }
+    case 'execute': out.push(`Damage: ${Math.round(bp * p * mult)} + 3 per Rage point above the cost`); out.push('Scales with: rank and Rage spent.'); break
+    case 'finisher':
+      if (a.stun) { out.push(`Stuns for ${a.stun} s per combo point (5 points: ${a.stun * 5} s).`); break }
+      if (a.buff) { out.push('Lasts longer with each combo point. Not refreshed while active.'); break }
+      out.push(`${a.dur ? 'Bleed' : 'Damage'} at 5 points: ${r((bp * 0.55 + d.ap * 0.12) * p * 5 * mult)}${a.dur ? ` over ${a.dur} s` : ''}`)
+      out.push(`Scales with: combo points, attack power (${d.ap}) and rank.`)
+      break
+    case 'spell': case 'drain': {
+      const base = phys ? white * 0.8 + bp * 0.4 : bp * d.spellMult + (d.sp * k) / Math.max(0.01, p)
+      out.push(`Damage: ${r(base * p * mult)}${a.aoe ? ' to each enemy in the group' : ''}`)
+      if (a.dot) out.push(`Plus a DoT on the enemy: ${Math.round(spellValue(d, bp, a.dot.power, spCoef(a, 'dot') * 0.5) * mult)} over ${a.dot.dur} s${!a.cast ? ' (not refreshed while active)' : ''}`)
+      if (a.heal) out.push(`Heals you for ${Math.round(a.heal * 100)}% of the damage dealt.`)
+      out.push(`Scales with: ${phys ? `weapon and attack power (${d.ap}); hit chance depends on weapon skill` : spellScale(k)}.`)
+      break
+    }
+    case 'dot':
+      if (phys) { out.push(`Damage: ${Math.round((bp * p * d.spellMult + d.ap * 0.1 * (a.dur ?? 12) / 3) * mult)} over ${a.dur ?? 12} s`); out.push(`Scales with: rank and attack power (${d.ap}).`); break }
+      out.push(`Damage: ${Math.round(spellValue(d, bp, p, k) * mult)} over ${a.dur ?? 12} s${a.aoe ? ' to each enemy in the group' : ''} (DoT on the enemy, not refreshed while active)`)
+      out.push(`Scales with: ${spellScale(k)}.`)
+      break
+    case 'heal':
+      if (a.healPct) out.push(`Heals ${Math.round(a.healPct * 100)}% of maximum health (${Math.round(d.maxHp * a.healPct)}).`)
+      else { out.push(`Healing: ${r(healAmount(h, d, a))}`); out.push(`Scales with: ${spellScale(k)} and healing talents.`) }
+      break
+    case 'hot': {
+      const hm = 1 + (d.m.heal ?? 0) + (d.m[`ab:${a.id}`] ?? 0)
+      out.push(`Healing: ${Math.round(spellValue(d, bp, p, k) * hm)} over ${a.dur ?? 12} s`)
+      out.push(`Scales with: ${spellScale(k)}.`)
+      break
+    }
+    case 'shield': out.push(`Absorbs: ${Math.round(a.shieldPct ? d.maxHp * a.shieldPct : spellValue(d, bp, p, k) * (1 + (d.m.shield ?? 0)))} damage`); break
+    case 'stun': out.push(a.cc ? `Incapacitates one enemy of a group for ${a.dur} s.` : `Stuns / roots for ${a.dur} s.`); break
+    case 'regen': out.push(`Restores ${Math.round((a.power ?? 0.3) * 100)}% mana (${Math.round(d.maxRes * (a.power ?? 0.3))}).`); break
+    case 'proc':
+      if (a.proc?.extra) out.push(`${Math.round(a.proc.chance * 100)}% chance for an extra weapon attack.`)
+      else if (a.proc) {
+        const dmg = spellValue(d, bp, a.proc.power, k) * dmgMult(d, a, false)
+        if (a.proc.power > 0) out.push(`${Math.round(a.proc.chance * 100)}% chance ${a.proc.on === 'hit' ? 'on hit' : 'when hit'}: ${r(dmg)} damage`)
+        if (a.proc.heal) out.push(`${Math.round(a.proc.chance * 100)}% chance: heals ${Math.round(spellValue(d, bp, a.proc.heal, k))}`)
+        if (a.proc.mana) out.push(`${Math.round(a.proc.chance * 100)}% chance: +${Math.round(d.maxRes * a.proc.mana)} mana`)
+        if (a.proc.power > 0 || a.proc.heal) out.push(`Scales with: ${spellScale(k)}.`)
+      }
+      break
+    case 'totem':
+      if (a.tick?.power) out.push(`Every ${a.tick.every} s: ${r(spellValue(d, bp, a.tick.power, k) * dmgMult(d, a, false))} damage${a.aoe ? ' to each enemy' : ''}`)
+      if (a.tick?.heal) out.push(`Every ${a.tick.every} s: heals ${Math.round(spellValue(d, bp, a.tick.heal, k))}`)
+      if (a.tick?.mana) out.push(`Every ${a.tick.every} s: +${Math.round(d.maxRes * a.tick.mana)} mana`)
+      out.push('The totem lasts 5 min, but disappears when you move on to the next enemy.')
+      break
+  }
+  if (a.buff && (a.kind === 'buff' || a.kind === 'cooldown' || a.kind === 'totem' || a.kind === 'proc' || a.kind === 'finisher')) {
+    const scale = a.kind === 'cooldown' || a.kind === 'finisher' ? 1 : 1 + (a.talent ? h.level : h.trained[a.id] ?? h.level) / 12
+    const fx = Object.entries(a.buff).filter(([k]) => k !== 'instant' && k !== 'noPet').map(([k, v]) => {
+      const flat = ['ap', 'sta', 'int', 'spi', 'all', 'str', 'agi', 'sp'].includes(k)
+      const val = flat ? `+${Math.round((v ?? 0) * scale)}` : k === 'immune' ? '' : `${(v ?? 0) > 0 ? '+' : ''}${Math.round((v ?? 0) * 100)}%`
+      const PL: Record<string, string> = { ap: 'attack power', sta: 'Stamina', int: 'Intellect', spi: 'Spirit', all: 'all attributes', str: 'Strength', agi: 'Agility', armor: 'armor', dr: 'damage reduction', crit: 'critical strike', spellCrit: 'spell crit', dodge: 'dodge', haste: 'attack speed', dmg: 'damage', meleeDmg: 'physical damage', castRegen: 'in-combat mana regeneration', immune: 'invulnerability', allPct: 'all attributes', petDmg: 'pet damage', energy: 'Energy regeneration', resGen: 'Rage generation', lifesteal: 'healing from Shadow damage', sp: 'spell power', hit: 'hit', sweep: 'damage vs groups (second target)', retal: 'counterattack', cost: 'cost', shadow: 'Shadow damage', dot: 'DoT damage' }
+      return `${val} ${PL[k] ?? k}`.trim()
+    })
+    if (fx.length) out.push(`Effect: ${fx.join(', ')}${a.dur && a.kind !== 'buff' ? ` for ${a.dur} s` : ''}`)
+    if (scale > 1) out.push('Flat values grow with the rank you train.')
+  }
+  return out
+}

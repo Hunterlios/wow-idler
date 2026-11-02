@@ -1,5 +1,8 @@
 // Ikony rysowane proceduralnie na canvasie (własne, w klimacie Classica): przedmioty i umiejętności.
 // Wynik cache'owany jako dataURL.
+import { firstIcon, pickIcon, iconUrl } from './assets'
+import { ABILITY_ICONS, RACIAL_ICONS, MENU_ICONS, RACE_ICON, CLASS_ICON, itemIconGroups } from './iconmap'
+import { JUNK as JUNK_NAMES } from '../game/items'
 import type { Ability, School } from '../data/classes'
 import type { Item } from '../game/types'
 
@@ -265,7 +268,17 @@ function drawJunk(g: CanvasRenderingContext2D, name: string, rarityColor: string
   void rarityColor
 }
 
+// Ikona z assets/icons dla przedmiotu (stabilna dla nazwy), jeśli gracz dostarczył ikony
+function extItemIcon(it: Item): string | null {
+  const junkType = !it.slot && it.rarity === 0 ? Object.entries(JUNK_NAMES).find(([, l]) => l.includes(it.name))?.[0] : undefined
+  const groups = itemIconGroups(it, junkType)
+  if (!groups) return null
+  for (const g of groups) { const u = pickIcon([g], it.name); if (u) return u }
+  return null
+}
 export function itemIcon(it: Item): string {
+  const ext = extItemIcon(it)
+  if (ext) return ext
   const key = `${it.slot}|${it.weaponType}|${it.armorType}|${it.rarity}|${it.ilvl >> 3}|${it.bagSize ?? 0}|${it.slot ? '' : it.name}|${it.quest ? 'q' : ''}`
   const hit = cache.get(key)
   if (hit) return hit
@@ -276,6 +289,8 @@ export function itemIcon(it: Item): string {
     fillShape(g, '#8a6a3a', () => { g.moveTo(16, 24); g.quadraticCurveTo(12, 56, 32, 56); g.quadraticCurveTo(52, 56, 48, 24); g.closePath() })
     g.strokeStyle = '#d4a838'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(18, 24); g.lineTo(46, 24); g.stroke()
     fillShape(g, '#6a4a2a', () => { g.moveTo(24, 24); g.lineTo(28, 10); g.lineTo(36, 10); g.lineTo(40, 24); g.closePath() })
+  } else if (it.kit) {
+    glyph(g, 'hammer', '#c8ccd8')
   } else if (!it.slot) {
     drawJunk(g, it.name, gc)
     if (it.quest) { g.fillStyle = '#ffd100'; g.font = 'bold 22px serif'; g.fillText('!', 48, 22) }
@@ -387,6 +402,8 @@ function glyph(g: CanvasRenderingContext2D, kind: string, col: string) {
 }
 
 export function abilityIcon(a: Ability, cls: string): string {
+  const ext = firstIcon(ABILITY_ICONS[a.id])
+  if (ext) return ext
   const key = `a|${a.id}`
   const hit = cache.get(key)
   if (hit) return hit
@@ -402,15 +419,102 @@ export function abilityIcon(a: Ability, cls: string): string {
   return url
 }
 
-// Ikona ogólna (przyciski menu)
-export function menuIcon(kind: 'char' | 'spell' | 'quest' | 'map' | 'town' | 'capital' | 'gear' | 'log'): string {
-  const key = `m|${kind}`
+// Ikony rasowych zdolności i stanów wroga (ogłuszenie, spowolnienie)
+const RACIAL_LOOK: Record<string, [string, string]> = {
+  bloodfury: ['fire', 'drops'], berserking: ['fire', 'axe'], stoneform: ['physical', 'rock'], warstomp: ['physical', 'stars'], cannibalize: ['shadow', 'skull'],
+  shadowmeld: ['shadow', 'moon'], escape: ['arcane', 'wind'], perception: ['holy', 'target'], wotf: ['shadow', 'skull'], slow: ['frost', 'flake'],
+}
+export function racialIcon(id: string): string {
+  const ext = firstIcon(RACIAL_ICONS[id])
+  if (ext) return ext
+  const key = `r|${id}`
+  const hit = cache.get(key)
+  if (hit) return hit
+  const [school, gl] = RACIAL_LOOK[id] ?? ['physical', 'orb']
+  const g = canvas()
+  const [c1, c2] = SCHOOL_BG[school as keyof typeof SCHOOL_BG]
+  bg(g, shade(c1, -0.35), c2)
+  glyph(g, gl, shade(c1, 0.2))
+  frame(g)
+  const url = g.canvas.toDataURL()
+  cache.set(key, url)
+  return url
+}
+
+// Ikony mikro-menu: czytelne piktogramy (postać, księga, talenty, umiejętności, zadania, mapa, kronika, ustawienia)
+export type MenuKind = 'char' | 'spell' | 'talent' | 'skills' | 'quest' | 'map' | 'town' | 'capital' | 'gear' | 'log' | 'hide'
+export function menuIcon(kind: MenuKind): string {
+  const ext = firstIcon(MENU_ICONS[kind])
+  if (ext) return ext
+  const key = `m2|${kind}`
   const hit = cache.get(key)
   if (hit) return hit
   const g = canvas()
-  bg(g, '#4a3a22', '#100a04')
-  const map: Record<string, string> = { char: 'fist', spell: 'star', quest: 'cross', map: 'target', town: 'sun', capital: 'sun', gear: 'ring', log: 'wave' }
-  glyph(g, map[kind], '#ffd76a')
+  const BG: Record<MenuKind, [string, string]> = {
+    char: ['#6a4a2a', '#140c04'], spell: ['#2a3a7a', '#060a1c'], talent: ['#2a6a2a', '#061406'], skills: ['#6a2a2a', '#140404'],
+    quest: ['#7a6a2a', '#141004'], map: ['#3a6a7a', '#04121a'], town: ['#5a4a3a', '#100a04'], capital: ['#5a4a3a', '#100a04'],
+    gear: ['#4a4a4a', '#0c0c0c'], log: ['#5a3a6a', '#0e0614'], hide: ['#3a3a3a', '#0a0a0a'],
+  }
+  bg(g, BG[kind][0], BG[kind][1])
+  const P = (pts: [number, number][], fill: string, stroke?: string) => { g.beginPath(); pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fillStyle = fill; g.fill(); if (stroke) { g.strokeStyle = stroke; g.lineWidth = 2; g.stroke() } }
+  switch (kind) {
+    case 'char': // popiersie w hełmie
+      P([[14, 58], [18, 44], [30, 40], [34, 40], [46, 44], [50, 58]], '#8a6a3a', '#2a1a08')
+      g.fillStyle = '#e0b890'; g.beginPath(); g.arc(32, 28, 11, 0, 7); g.fill()
+      P([[19, 27], [21, 15], [32, 9], [43, 15], [45, 27], [40, 22], [24, 22]], '#b8bcc6', '#3a3a3a')
+      g.fillStyle = '#2a1a08'; g.fillRect(27, 28, 3, 3); g.fillRect(35, 28, 3, 3)
+      break
+    case 'spell': // księga z gwiazdą
+      P([[10, 18], [32, 14], [32, 54], [10, 56]], '#c8b080', '#3a2a10'); P([[32, 14], [54, 18], [54, 56], [32, 54]], '#d8c090', '#3a2a10')
+      g.strokeStyle = '#3a2a10'; g.lineWidth = 2; g.beginPath(); g.moveTo(32, 14); g.lineTo(32, 54); g.stroke()
+      g.fillStyle = '#4a6aff'; g.beginPath(); for (let k = 0; k < 10; k++) { const a = (k * Math.PI) / 5 - Math.PI / 2, r = k % 2 ? 4 : 9; g.lineTo(43 + Math.cos(a) * r, 34 + Math.sin(a) * r) } g.fill()
+      g.fillStyle = '#7a6a4a'; for (const y of [26, 32, 38, 44]) g.fillRect(14, y, 14, 2)
+      break
+    case 'talent': // drzewko z trzema gałęziami
+      g.strokeStyle = '#8a6a3a'; g.lineWidth = 5; g.lineCap = 'round'
+      g.beginPath(); g.moveTo(32, 58); g.lineTo(32, 26); g.moveTo(32, 40); g.lineTo(18, 26); g.moveTo(32, 40); g.lineTo(46, 26); g.stroke()
+      for (const [x, y] of [[32, 18], [16, 22], [48, 22]]) { g.fillStyle = '#5ad05a'; g.beginPath(); g.arc(x, y, 8, 0, 7); g.fill(); g.fillStyle = '#c8ffc8'; g.beginPath(); g.arc(x - 2, y - 2, 3, 0, 7); g.fill() }
+      break
+    case 'skills': // skrzyżowane miecze
+      for (const s of [1, -1]) {
+        g.save(); g.translate(32, 34); g.rotate((s * Math.PI) / 4)
+        P([[-3, 14], [-3, -22], [0, -27], [3, -22], [3, 14]], '#d0d4dc', '#3a3a3a')
+        g.fillStyle = '#c8a040'; g.fillRect(-9, 12, 18, 4); g.fillStyle = '#5a3a1a'; g.fillRect(-2, 16, 4, 9)
+        g.restore()
+      }
+      break
+    case 'quest': // zwój z wykrzyknikiem
+      P([[14, 12], [50, 12], [50, 54], [14, 54]], '#e8d8a8', '#5a4a20')
+      g.fillStyle = '#c8b480'; g.fillRect(12, 8, 40, 6); g.fillRect(12, 52, 40, 6)
+      g.fillStyle = '#ffd100'; g.strokeStyle = '#3a2a00'; g.lineWidth = 2
+      g.beginPath(); g.moveTo(28, 18); g.lineTo(36, 18); g.lineTo(34, 38); g.lineTo(30, 38); g.closePath(); g.fill(); g.stroke()
+      g.beginPath(); g.arc(32, 45, 4, 0, 7); g.fill(); g.stroke()
+      break
+    case 'map': // złożona mapa z trasą
+      P([[8, 16], [24, 10], [40, 16], [56, 10], [56, 50], [40, 56], [24, 50], [8, 56]], '#d8c890', '#4a3a10')
+      g.strokeStyle = 'rgba(80,60,20,.6)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(24, 10); g.lineTo(24, 50); g.moveTo(40, 16); g.lineTo(40, 56); g.stroke()
+      g.fillStyle = '#6aa04a'; g.beginPath(); g.ellipse(20, 30, 8, 10, 0.3, 0, 7); g.fill(); g.fillStyle = '#4a8ac8'; g.beginPath(); g.ellipse(44, 38, 8, 6, 0, 0, 7); g.fill()
+      g.strokeStyle = '#c02020'; g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(16, 44); g.quadraticCurveTo(30, 20, 46, 24); g.stroke(); g.setLineDash([])
+      g.strokeStyle = '#c02020'; g.lineWidth = 3; g.beginPath(); g.moveTo(42, 20); g.lineTo(50, 28); g.moveTo(50, 20); g.lineTo(42, 28); g.stroke()
+      break
+    case 'log': // książka z piórem
+      P([[12, 14], [46, 14], [46, 54], [12, 54]], '#7a3a8a', '#200a28'); g.fillStyle = '#e8d8b0'; g.fillRect(16, 18, 26, 32)
+      g.fillStyle = '#8a7a5a'; for (const y of [24, 30, 36, 42]) g.fillRect(19, y, 20, 2)
+      P([[56, 8], [36, 44], [34, 50], [38, 46], [58, 12]], '#f0f0f0', '#5a5a5a')
+      break
+    case 'gear': { // zębatka
+      g.fillStyle = '#b8bcc6'; g.strokeStyle = '#2a2a2a'; g.lineWidth = 2
+      g.beginPath()
+      for (let k = 0; k < 16; k++) { const a = (k * Math.PI) / 8, r = k % 2 ? 16 : 22; g.lineTo(32 + Math.cos(a) * r, 32 + Math.sin(a) * r) }
+      g.closePath(); g.fill(); g.stroke()
+      g.fillStyle = BG.gear[1]; g.beginPath(); g.arc(32, 32, 7, 0, 7); g.fill()
+      break
+    }
+    case 'hide': g.fillStyle = '#d8d8d8'; g.fillRect(16, 40, 32, 6); P([[32, 36], [20, 20], [44, 20]], '#d8d8d8'); break
+    case 'town': case 'capital':
+      P([[12, 54], [12, 30], [32, 14], [52, 30], [52, 54]], '#c8a070', '#3a2a10'); g.fillStyle = '#5a3a1a'; g.fillRect(27, 38, 10, 16)
+      break
+  }
   frame(g)
   const url = g.canvas.toDataURL()
   cache.set(key, url)
@@ -441,3 +545,7 @@ export function talentIcon(key: string | undefined, tree: number): string {
   cache.set(ck, url)
   return url
 }
+
+// Portret rasy i ikona klasy z assets (null = brak, wtedy UI pokazuje własny znak)
+export const raceIcon = (race: string, female = false) => iconUrl(RACE_ICON(race, female))
+export const classIcon = (cls: string) => iconUrl(CLASS_ICON(cls))

@@ -117,13 +117,13 @@ export function equipFromInv(h: Hero, idx: number, forced?: EquipSlot): string |
   const it = h.inv[idx]
   if (!it) return null
   if (it.bagSize) {
-    if (!h.bags.some((b) => !b)) return 'Brak wolnego slotu na torbę.'
+    if (!h.bags.some((b) => !b)) return 'No free bag slot.'
     h.inv[idx] = null
     equipBag(h, it)
     return null
   }
-  if (!it.slot) return 'Tego nie da się założyć.'
-  if (!canWear(h, it)) return 'Twoja klasa nie może tego używać.'
+  if (!it.slot) return 'You can\'t equip that.'
+  if (!canWear(h, it)) return 'Your class can\'t use that.'
   const t = forced ?? targetSlot(h, it)!
   h.inv[idx] = null
   const back: Item[] = []
@@ -150,11 +150,11 @@ export function unequipBag(h: Hero, bagIdx: number, target?: number): string | n
   const segs = segmentsOf(h)
   const start = bagStart(h, bagIdx)
   const size = bag.bagSize ?? 0
-  if (target != null && target >= start && target < start + size) return 'Nie możesz włożyć torby do niej samej.'
-  if (target != null && h.inv[target]) return 'Upuść torbę na wolne miejsce w innej torbie.'
+  if (target != null && target >= start && target < start + size) return 'You can\'t put a bag inside itself.'
+  if (target != null && h.inv[target]) return 'Drop the bag on a free slot in another bag.'
   const inside = segs[bagIdx + 1].filter((x): x is Item => !!x)
   const freeElsewhere = segs.reduce((a, seg, i) => (i === bagIdx + 1 ? a : a + seg.filter((x) => !x).length), 0)
-  if (freeElsewhere < inside.length + 1) return 'Za mało miejsca, żeby opróżnić i schować torbę.'
+  if (freeElsewhere < inside.length + 1) return 'Not enough space to empty and store the bag.'
   h.bags[bagIdx] = null
   const rest: (Item | null)[] = [...segs[0]]
   for (let b = 0; b < 4; b++) if (b !== bagIdx && h.bags[b]) rest.push(...segs[b + 1])
@@ -171,8 +171,8 @@ export function unequipBag(h: Hero, bagIdx: number, target?: number): string | n
 // Zakłada torbę z inv do wskazanego (pustego) slotu na torby
 export function equipBagAt(h: Hero, idx: number, bagIdx: number): string | null {
   const it = h.inv[idx]
-  if (!it?.bagSize) return 'To nie jest torba.'
-  if (h.bags[bagIdx]) return 'Ten slot na torbę jest zajęty.'
+  if (!it?.bagSize) return 'That is not a bag.'
+  if (h.bags[bagIdx]) return 'That bag slot is taken.'
   // tymczasowo zajmij inne sloty, by equipBag trafił w wybrany
   const saved = h.bags.slice()
   for (let b = 0; b < 4; b++) if (b !== bagIdx && !h.bags[b]) h.bags[b] = { id: -9, name: '', rarity: 0, ilvl: 0, value: 0, bagSize: 0 }
@@ -189,7 +189,7 @@ export function unequipTo(h: Hero, slot: EquipSlot, idx: number): string | null 
   const there = h.inv[idx]
   if (!there) { h.inv[idx] = it; delete h.equip[slot]; return null }
   if (there.slot && fitsSlot(there, slot) && canWear(h, there)) return equipFromInv(h, idx, slot)
-  return 'Upuść na wolne miejsce w torbie.'
+  return 'Drop it on a free bag slot.'
 }
 
 // Czy przedmiot pasuje do slotu postaci
@@ -205,7 +205,7 @@ export const isSlot = (x: string): x is EquipSlot => (ALL_SLOTS as string[]).inc
 export function unequip(h: Hero, slot: EquipSlot): string | null {
   const it = h.equip[slot]
   if (!it) return null
-  if (!addToInv(h, it)) return 'Torby są pełne.'
+  if (!addToInv(h, it)) return 'Your bags are full.'
   delete h.equip[slot]
   return null
 }

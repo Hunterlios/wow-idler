@@ -1,5 +1,5 @@
 // Świat: mapy (strefy) z trasy rasy, podstrefy, miasta, stolice, wymagania bossów.
-import { ROUTES, ZONES, zoneById, type Zone, type Mob, type MobType } from '../data/zones'
+import { ROUTES, ZONES, LINKS, zoneById, type Zone, type Mob, type MobType } from '../data/zones'
 const ZONE_IDS = ZONES.map((z) => z.id)
 import { subzonesOf, subRange, type SubZone } from '../data/subzones'
 import { raceById, type Faction } from '../data/races'
@@ -63,9 +63,21 @@ export function townOf(z: Zone, faction: Faction): string | null {
   if (h && h.faction !== faction) return h.alt
   return parts[0]
 }
-export const capitalOf = (s: GameState) => raceById(s.hero.race).start.capital
-// mapa, na której leży stolica rasy (np. Orgrimmar -> Durotar)
-export const capitalZone = (s: GameState) => ZONES.find((z) => z.capital === capitalOf(s))!.id
+// Stolice frakcji: Horda (Orgrimmar, Thunder Bluff, Undercity), Przymierze (Stormwind, Ironforge, Darnassus)
+export const factionCapitals = (f: Faction) => ZONES.filter((z) => z.capital && z.control === f).map((z) => ({ name: z.capital!, zone: z.id }))
+// Hearthstone: przypisana stolica (domyślnie stolica rasy)
+export const homeOf = (s: GameState) => s.home ?? raceById(s.hero.race).start.capital
+// Hearthstone działa dopiero po przypisaniu go w stolicy (nowa postać musi tam najpierw dojść)
+export const hasHearth = (s: GameState) => !!s.home
+// Stolica, w której jesteś (albo przypisana do Hearthstone)
+export const capitalOf = (s: GameState) => (s.where === 'capital' && s.inCap ? s.inCap : homeOf(s))
+export const zoneOfCapital = (name: string) => ZONES.find((z) => z.capital === name)!.id
+export const capitalZone = (s: GameState) => zoneOfCapital(homeOf(s))
+// Stolica twojej frakcji na mapie, na której stoisz (można do niej wejść pieszo)
+export function capitalHere(s: GameState) {
+  const z = zoneById(s.loc.zone)
+  return z.capital && z.control === s.hero.faction ? z.capital : null
+}
 
 export const isUnlocked = (s: GameState, zoneId: string) => s.unlocked.includes(zoneId)
 // Jak w grze: na każdą mapę można pójść od razu (także wyższego poziomu). W obrębie mapy podstrefy
@@ -79,90 +91,100 @@ export function zonePct(s: GameState, zoneId: string) {
   return (p.cleared + Math.min(1, p.kills / killsNeeded(zoneId, p.cleared)) * 0.9) / n
 }
 
-// ---------------------------------------------------------------- transport: statki i zeppeliny z Classica
-export type Transport = { kind: 'ship' | 'zeppelin'; faction: Faction | 'neutral'; a: string; b: string; label: string }
+// ---------------------------------------------------------------- transport: statki, zeppeliny i tramwaj z Classica
+// Porty jak w grze: Menethil Harbor (Wetlands), Auberdine (Darkshore), Theramore (Dustwallow Marsh),
+// Rut'theran Village (Teldrassil), Booty Bay i Grom'gol (Stranglethorn), Ratchet (The Barrens),
+// wieże zeppelinów pod Orgrimmarem (Durotar) i Undercity (Tirisfal), Deeprun Tram (Stormwind ↔ Ironforge).
+export type Transport = { kind: 'ship' | 'zeppelin' | 'tram'; faction: Faction | 'neutral'; a: string; b: string; label: string; secs: number }
 export const TRANSPORTS: Transport[] = [
-  { kind: 'ship', faction: 'alliance', a: 'wetlands', b: 'darkshore', label: 'Statek: Menethil Harbor ↔ Auberdine' },
-  { kind: 'ship', faction: 'alliance', a: 'wetlands', b: 'dustwallow', label: 'Statek: Menethil Harbor ↔ Theramore' },
-  { kind: 'ship', faction: 'alliance', a: 'teldrassil', b: 'darkshore', label: "Statek: Rut'theran Village ↔ Auberdine" },
-  { kind: 'ship', faction: 'neutral', a: 'stranglethorn', b: 'barrens', label: 'Statek: Booty Bay ↔ Ratchet' },
-  { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'tirisfal', label: 'Zeppelin: Orgrimmar ↔ Undercity' },
-  { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'stranglethorn', label: "Zeppelin: Orgrimmar ↔ Grom'gol" },
+  { kind: 'ship', faction: 'alliance', a: 'wetlands', b: 'darkshore', label: 'Ship: Menethil Harbor ↔ Auberdine', secs: 150 },
+  { kind: 'ship', faction: 'alliance', a: 'wetlands', b: 'dustwallow', label: 'Ship: Menethil Harbor ↔ Theramore', secs: 150 },
+  { kind: 'ship', faction: 'alliance', a: 'teldrassil', b: 'darkshore', label: "Ship: Rut'theran Village ↔ Auberdine", secs: 60 },
+  { kind: 'ship', faction: 'neutral', a: 'stranglethorn', b: 'barrens', label: 'Ship: Booty Bay ↔ Ratchet', secs: 150 },
+  { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'tirisfal', label: 'Zeppelin: Orgrimmar ↔ Undercity', secs: 120 },
+  { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'stranglethorn', label: "Zeppelin: Orgrimmar ↔ Grom'gol", secs: 120 },
+  { kind: 'zeppelin', faction: 'horde', a: 'tirisfal', b: 'stranglethorn', label: "Zeppelin: Undercity ↔ Grom'gol", secs: 120 },
+  { kind: 'tram', faction: 'alliance', a: 'elwynn', b: 'dun_morogh', label: 'Deeprun Tram: Stormwind ↔ Ironforge', secs: 60 },
 ]
-const RIDE = 60 // s rejsu / lotu (RIDE_SECS)
+// czasy: rejs / lot z czekaniem na transport, jak w grze (statki dłużej niż zeppeliny)
+export const RIDE_SECS = 120
 export const landmass = (id: string) => { const z = zoneById(id); const p = z.parent ?? id; return p === 'teldrassil' ? 'tel' : z.continent }
-const mainZone = (id: string) => zoneById(id).parent ?? id
+// marsz między sąsiednimi mapami (czas rośnie z odległością na mapie świata)
 function walk(a: string, b: string) {
   const za = zoneById(a), zb = zoneById(b)
-  return Math.min(150, 25 + Math.hypot(za.x - zb.x, za.y - zb.y) * 1.3)
+  return 35 + Math.hypot(za.x - zb.x, za.y - zb.y) * 2.6
 }
+const okFor = (f: Faction) => (t: Transport) => t.faction === 'neutral' || t.faction === f
 
-export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin'; label: string; walkSecs: number; speed: number; blocked?: string }
-// Statki i zeppeliny, które odpływają z tej mapy (port w tej strefie)
+export type Waypoint = { zone: string; at: number } // wejście na mapę po `at` sekundach drogi
+export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; walkSecs: number; speed: number; blocked?: string; path: Waypoint[]; via: string[] }
+// Statki / zeppeliny / tramwaj odjeżdżające z tej mapy
+// Port leży na konkretnej mapie (np. tramwaj w Ironforge na mapie Dun Morogh), a nie w obszarze startowym
+// (Coldridge Valley, Valley of Trials, Shadowglen...): stamtąd trzeba najpierw dojść.
 export function portsOf(faction: Faction, zone: string) {
-  const m = mainZone(zone)
-  return TRANSPORTS.map((t, i) => ({ t, i, to: t.a === m ? t.b : t.b === m ? t.a : '' }))
-    .filter((x) => x.to && (x.t.faction === 'neutral' || x.t.faction === faction))
-}
-export const RIDE_SECS = 60
-// Najbliższy port na obecnym lądzie z połączeniem na ląd celu (podpowiedź na mapie)
-export function portHint(faction: Faction, from: string, to: string) {
-  const want = landmass(to)
-  const ok = TRANSPORTS.filter((t) => t.faction === 'neutral' || t.faction === faction)
-  let best: { port: string; t: Transport; secs: number } | null = null
-  for (const t of ok) {
-    for (const [a, b] of [[t.a, t.b], [t.b, t.a]]) {
-      if (landmass(a) !== landmass(from) || landmass(b) !== want) continue
-      const secs = a === mainZone(from) ? 0 : walk(from, a)
-      if (!best || secs < best.secs) best = { port: a, t, secs }
-    }
-  }
-  return best
+  const m = zone
+  return TRANSPORTS.map((t, i) => ({ t, i, to: t.a === m ? t.b : t.b === m ? t.a : '' })).filter((x) => x.to && okFor(faction)(x.t))
 }
 export const SUB_WALK = 12 // s między podstrefami
-// speed = premia z formy podróżnej (Ghost Wolf, Travel Form): skraca tylko odcinki piesze
-// allowRide: tylko automatyczne przejście po bossie łączy marsz do portu, rejs i marsz dalej.
-// Gracz z mapy chodzi pieszo po jednym lądzie, a na inny kontynent wsiada sam w porcie.
-export function planTrip(faction: Faction, from: string, to: string, speed = 0, allowRide = false): TripPlan {
-  if (from === to) return { total: Math.round(SUB_WALK / (1 + speed)), kind: 'walk', label: '', walkSecs: SUB_WALK, speed }
-  if (!allowRide && landmass(from) !== landmass(to)) {
-    const hint = portHint(faction, from, to)
-    return { total: 0, kind: 'walk', label: '', walkSecs: 0, speed, blocked: hint ? `Inny ląd. Dojdź do portu (${zoneById(hint.port).name}) i wsiądź: ${hint.t.label}.` : 'Inny ląd: brak połączenia dla twojej frakcji.' }
+
+// Graf świata: marsz po sąsiednich mapach (LINKS, ten sam ląd) + opcjonalnie transporty
+type Edge = { to: string; secs: number; t?: Transport }
+function edges(faction: Faction, z: string, rides: boolean, speed: number): Edge[] {
+  const out: Edge[] = []
+  for (const [a, b] of LINKS) {
+    const o = a === z ? b : b === z ? a : null
+    if (o && landmass(o) === landmass(z)) out.push({ to: o, secs: walk(z, o) / (1 + speed) })
   }
-  const ZS = ZONE_IDS
-  const dist: Record<string, number> = {}
-  const prev: Record<string, { via: Transport | null; from: string }> = {}
-  for (const z of ZS) dist[z] = Infinity
-  dist[from] = 0
+  if (rides) for (const p of portsOf(faction, z)) out.push({ to: p.to, secs: p.t.secs, t: p.t })
+  return out
+}
+function route(faction: Faction, from: string, to: string, rides: boolean, speed: number) {
+  const dist: Record<string, number> = { [from]: 0 }
+  const prev: Record<string, { from: string; e: Edge }> = {}
   const done = new Set<string>()
-  const ok = TRANSPORTS.filter((t) => t.faction === 'neutral' || t.faction === faction)
   while (true) {
-    let u = ''
-    let best = Infinity
-    for (const z of ZS) if (!done.has(z) && dist[z] < best) { best = dist[z]; u = z }
+    let u = '', best = Infinity
+    for (const [k, v] of Object.entries(dist)) if (!done.has(k) && v < best) { best = v; u = k }
     if (!u || u === to) break
     done.add(u)
-    for (const v of ZS) {
-      if (done.has(v) || landmass(v) !== landmass(u)) continue
-      const c = dist[u] + walk(u, v)
-      if (c < dist[v]) { dist[v] = c; prev[v] = { via: null, from: u } }
-    }
-    for (const t of ok) {
-      const ends = mainZone(u) === t.a ? t.b : mainZone(u) === t.b ? t.a : null
-      if (!ends || done.has(ends)) continue
-      const c = dist[u] + RIDE
-      if (c < dist[ends]) { dist[ends] = c; prev[ends] = { via: t, from: u } }
+    for (const e of edges(faction, u, rides, speed)) {
+      const c = dist[u] + e.secs
+      if (c < (dist[e.to] ?? Infinity)) { dist[e.to] = c; prev[e.to] = { from: u, e } }
     }
   }
+  if (dist[to] == null) return null
+  const steps: { zone: string; e: Edge }[] = []
+  for (let v = to; prev[v]; v = prev[v].from) steps.unshift({ zone: v, e: prev[v].e })
+  return steps
+}
+
+// Najszybsza droga na inny ląd: do którego portu dojść i czym płynąć (podpowiedź na mapie)
+export function portHint(faction: Faction, from: string, to: string) {
+  const steps = route(faction, from, to, true, 0)
+  if (!steps) return null
+  let at = from
+  for (const st of steps) { if (st.e.t) return { port: at, t: st.e.t }; at = st.zone }
+  return null
+}
+
+// allowRide: tylko automatyczne przejście po bossie łączy marsz, rejs i marsz dalej.
+// Gracz z mapy chodzi pieszo po jednym lądzie, a transportem jedzie sam z portu.
+export function planTrip(faction: Faction, from: string, to: string, speed = 0, allowRide = false): TripPlan {
+  if (from === to) { const t = Math.round(SUB_WALK / (1 + speed)); return { total: t, kind: 'walk', label: '', walkSecs: SUB_WALK, speed, path: [], via: [] } }
+  if (!allowRide && landmass(from) !== landmass(to)) {
+    const hint = portHint(faction, from, to)
+    return { total: 0, kind: 'walk', label: '', walkSecs: 0, speed, path: [], via: [], blocked: hint ? `Another continent. Fastest way: walk to ${zoneById(hint.port).name} and take: ${hint.t.label}.` : 'Another continent: no connection for your faction.' }
+  }
+  const steps = route(faction, from, to, allowRide, speed)
+  if (!steps) return { total: 0, kind: 'walk', label: '', walkSecs: 0, speed, path: [], via: [], blocked: 'No route.' }
+  let t = 0, walkSecs = 0
   let kind: TripPlan['kind'] = 'walk'
   const labels: string[] = []
-  let rides = 0
-  for (let v = to; prev[v]; v = prev[v].from) {
-    const t = prev[v].via
-    if (t) { kind = t.kind; labels.unshift(t.label); rides++ }
+  const path: Waypoint[] = []
+  for (const st of steps) {
+    t += st.e.secs
+    if (st.e.t) { kind = st.e.t.kind; labels.push(st.e.t.label) } else walkSecs += st.e.secs * (1 + speed)
+    path.push({ zone: st.zone, at: Math.round(t) })
   }
-  const label = labels.join(' → ')
-  const all = dist[to] === Infinity ? 60 : dist[to]
-  const walkSecs = Math.max(0, all - rides * RIDE)
-  return { total: Math.round(Math.min(400, walkSecs / (1 + speed) + rides * RIDE)), kind, label, walkSecs, speed }
+  return { total: Math.round(t), kind, label: labels.join(' → '), walkSecs, speed, path, via: steps.slice(0, -1).map((x) => x.zone) }
 }

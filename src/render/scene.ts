@@ -3,8 +3,17 @@
 import { classById, type School } from '../data/classes'
 import { raceById } from '../data/races'
 import type { Biome, MobType } from '../data/zones'
-import { currentZone, activePet, aliveOf as aliveOfMob } from '../game/sim'
-import { styleOf } from '../game/formulas'
+import { currentZone, activePet, aliveOf as aliveOfMob, heroInMelee } from '../game/sim'
+import { styleOf, grants, active } from '../game/formulas'
+import { abilityIcon, racialIcon } from './icons'
+
+// obrazki ikon (data URL) do rysowania na canvasie
+const IMG = new Map<string, HTMLImageElement>()
+function img(url: string) {
+  let i = IMG.get(url)
+  if (!i) { i = new Image(); i.src = url; IMG.set(url, i) }
+  return i
+}
 import { zoneById } from '../data/zones'
 import { townOf } from '../game/world'
 import type { GameEvent, GameState } from '../game/types'
@@ -97,12 +106,12 @@ export class Scene {
     switch (e.t) {
       case 'dmg':
         if (e.src === 'mob') {
-          if (e.miss) add(hx, e.miss === 'dodge' ? 'Unik' : e.miss === 'absorb' ? 'Pochłonięte' : 'Pudło', '#ffffff', 10)
+          if (e.miss) add(hx, e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : e.miss === 'absorb' ? 'Absorb' : 'Miss', '#ffffff', 10)
           else add(hx, `-${e.amt}`, '#ff4040', 12)
         } else {
-          if (e.miss) add(mx, e.miss === 'dodge' ? 'Unik' : 'Pudło', '#dddddd', 10)
+          if (e.miss) add(mx, `${e.ability ? `${e.ability}: ` : ''}${e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : 'Miss'}`, '#dddddd', 11)
           else {
-            add(mx, `${e.amt}`, e.src === 'pet' ? '#ffd28a' : e.school && e.school !== 'physical' ? SCHOOL_COLOR[e.school] : '#ffff66', e.crit ? 17 : 12)
+            add(mx, `${e.amt}${e.glance ? ' (glancing)' : ''}`, e.src === 'pet' ? '#ffd28a' : e.school && e.school !== 'physical' ? SCHOOL_COLOR[e.school] : '#ffff66', e.crit ? 17 : 12)
             this.mobFlash = 0.15
             if (e.src === 'hero' && (!e.school || e.school === 'physical')) this.heroLunge = 0.18
           }
@@ -125,7 +134,7 @@ export class Scene {
         }
         break
       case 'interrupt':
-        add(hx, 'Przerwane!', '#ff8040', 13)
+        add(hx, 'Interrupted!', '#ff8040', 13)
         break
       case 'kill': {
         const m = this.lastMobState
@@ -145,7 +154,7 @@ export class Scene {
         if (e.item.rarity >= 2) add(mx, e.item.name, RARITY_COLOR[e.item.rarity], 11)
         break
       case 'level':
-        this.fx.push({ kind: 'levelup', life: 2.5, text: `Poziom ${e.level}!` })
+        this.fx.push({ kind: 'levelup', life: 2.5, text: `Level ${e.level}!` })
         break
       case 'racial':
         this.fx.push({ kind: 'racial', life: 1.6, text: e.name })
@@ -219,7 +228,7 @@ export class Scene {
       this.grass(B, gy)
       return
     }
-    if (s.phase === 'travel' && s.trip && s.trip.kind !== 'walk') {
+    if (s.phase === 'travel' && s.trip && (s.trip.kind === 'ship' || s.trip.kind === 'zeppelin')) {
       this.transport(s, dt)
       return
     }
@@ -278,10 +287,7 @@ export class Scene {
         const col = s.mob.lvl > s.hero.level + 2 ? '#ff5050' : s.mob.lvl >= s.hero.level - 2 ? '#ffe060' : '#60e060'
         this.text(`${s.mob.name} (${s.mob.lvl})${s.mob.count > 1 ? ` ×${aliveOfMob(s.mob)}` : ''}`, this.mobX, by - 4, col, 10, true)
       }
-      if (s.mob.slow > 0) this.text('❄', this.mobX + bw / 2 + 8, by + 5, '#9ad8ff', 10, true)
-      if (s.mob.dots.length) {
-        s.mob.dots.forEach((d, i) => { ctx.fillStyle = SCHOOL_COLOR[d.school]; ctx.fillRect(this.mobX - bw / 2 + i * 6, by + 6, 4, 3) })
-      }
+      this.mobDebuffs(s, by + 7)
     }
 
     // pupil
@@ -364,7 +370,7 @@ export class Scene {
 
     // pasek rzucania nad postacią
     const cst = s.hero.casting
-    if (cst && s.phase === 'fight') {
+    if (cst && (s.phase === 'fight' || s.phase === 'heal')) {
       const ab = classById(s.hero.cls).abilities.find((a) => a.id === cst.id)
       // mały pasek nad głową (nazwa czaru jest w ramce postaci)
       const bw = 34, bx = this.heroX - bw / 2, by = Math.max(4, gy - 27 * p)
@@ -375,7 +381,7 @@ export class Scene {
 
     // napisy stanu
     if (s.phase === 'travel') this.travelBanner(s)
-    if (s.phase === 'dead') this.text(`Duch wraca do zwłok... ${Math.ceil(s.phaseT)} s`, w / 2, 16, '#c0d8ff', 12, true)
+    if (s.phase === 'dead') this.text(`Your ghost is running back to the corpse... ${Math.ceil(s.phaseT)} s`, w / 2, 16, '#c0d8ff', 12, true)
   }
 
   // Podróż: skąd → dokąd, pasek postępu i odliczanie
@@ -488,7 +494,7 @@ export class Scene {
       c.save(); c.translate(cx - this.heroX + 62 * p, -(this.groundY - (y - 12 * p))); this.hero(s, this.groundY, false, dt); c.restore()
     }
     this.text(s.trip!.label, w * 0.78, 18, '#ffd100', 13, true)
-    this.text(`${Math.ceil(s.phaseT)} s do celu`, w * 0.78, 34, '#ffffff', 11, true)
+    this.text(`${Math.ceil(s.phaseT)} s to arrival`, w * 0.78, 34, '#ffffff', 11, true)
   }
 
   clouds(night: boolean) {
@@ -565,15 +571,15 @@ export class Scene {
     c.fillRect(0, gy, this.w, 6)
     // NPC
     const npcs: [number, string, string][] = capital
-      ? [[0.45, 'Trener', classById(s.hero.cls).color], [0.62, 'Kupiec', '#8a6a3a']]
-      : [[0.45, 'Zadania', '#c8a24a'], [0.62, 'Trener', classById(s.hero.cls).color]]
+      ? [[0.45, 'Trainer', classById(s.hero.cls).color], [0.62, 'Vendor', '#8a6a3a']]
+      : [[0.45, 'Quests', '#c8a24a'], [0.62, 'Vendor', '#8a6a3a']]
     for (const [fx, label, col] of npcs) {
       const x = this.w * fx
       this.shadow(x, gy, 8 * p)
       c.filter = 'drop-shadow(0 0 1px #000)'
       this.biped(x, gy, col, 24, 10, horde ? '#5f8f3a' : '#e8b98f')
       c.filter = 'none'
-      if (label === 'Zadania') this.text(s.quests.some((q) => q.have >= q.need && q.zone === s.loc.zone) ? '?' : '!', x, gy - 34 * p, '#ffd100', 18, true)
+      if (label === 'Quests') this.text(s.quests.some((q) => q.have >= q.need && q.zone === s.loc.zone) ? '?' : '!', x, gy - 34 * p, '#ffd100', 18, true)
       this.text(label, x, gy - 26 * p, '#ffffff', 10, true)
     }
     // bohater stoi
@@ -582,6 +588,34 @@ export class Scene {
     this.hero(s, gy, false, dt)
     s.phase = saved
     this.text(capital ? `${raceById(s.hero.race).start.capital}` : townLabel(s), this.w / 2, 16, '#ffd100', 14, true)
+  }
+
+  // Debuffy na wrogu (jak na nameplate w grze): DoT-y, klątwy / okrzyki / znaki, ogłuszenie, spowolnienie,
+  // obezwładnienie — ikony z licznikiem pod paskiem zdrowia
+  mobDebuffs(s: GameState, y: number) {
+    const mob = s.mob
+    if (!mob) return
+    const h = s.hero
+    const c = classById(h.cls)
+    const g = grants(h)
+    const list: { icon: string; left?: number }[] = []
+    for (const d of mob.dots) { const a = c.abilities.find((x) => x.id === d.id); list.push({ icon: a ? abilityIcon(a, h.cls) : racialIcon('cannibalize'), left: d.left }) }
+    for (const a of c.abilities) if (a.debuff && active(h, a, g)) list.push({ icon: abilityIcon(a, h.cls) })
+    if (mob.stun > 0) list.push({ icon: racialIcon('warstomp'), left: mob.stun })
+    if (mob.slow > 0) list.push({ icon: racialIcon('slow'), left: mob.slow })
+    if (mob.cc > 0) list.push({ icon: racialIcon('escape'), left: mob.cc })
+    if (!list.length) return
+    const ctx = this.ctx
+    const sz = 16
+    const x0 = this.mobX - (list.length * (sz + 2) - 2) / 2
+    list.forEach((d, i) => {
+      const x = x0 + i * (sz + 2)
+      const im = img(d.icon)
+      ctx.fillStyle = '#000'; ctx.fillRect(x - 1, y - 1, sz + 2, sz + 2)
+      if (im.complete) ctx.drawImage(im, x, y, sz, sz)
+      ctx.strokeStyle = '#c02020'; ctx.lineWidth = 1; ctx.strokeRect(x - 0.5, y - 0.5, sz + 1, sz + 1)
+      if (d.left != null) this.text(`${Math.ceil(d.left)}`, x + sz / 2, y + sz - 1, '#ffd100', 9, true)
+    })
   }
 
   text(t: string, x: number, y: number, color: string, size: number, bold = false) {
@@ -689,6 +723,7 @@ export class Scene {
       this.ctx.restore()
       return
     }
+    if (s.hero.cls === 'druid' && s.hero.form !== 'caster' && s.phase !== 'dead') { this.druidForm(s, gy, moving, dt); return }
     const c = this.ctx
     const p = this.px / 2
     const r = raceById(s.hero.race)
@@ -789,7 +824,7 @@ export class Scene {
       case 'bignose': c.fillStyle = shade(r.look.skin, -0.15); c.fillRect(hx + headS, top + headS * 0.45, 2 * p, 3 * p); break
     }
     // broń
-    this.weapon(s.hero.cls, x + W / 2 + 1 * p, base - legH - torsoH * 0.4, p, cl.color)
+    this.weapon(s, x + W / 2 + 1 * p, base - legH - torsoH * 0.4, p, cl.color)
     // poświata czaru / rzucanie
     if (s.hero.casting || this.castGlow > 0) {
       c.globalAlpha = 0.5 + Math.sin(this.t * 20) * 0.2
@@ -805,25 +840,54 @@ export class Scene {
     c.filter = 'none'
   }
 
-  weapon(cls: string, x: number, y: number, p: number, color: string) {
+  // Broń w ręce według tego, co postać naprawdę trzyma (łowca: łuk / strzelba przy strzelaniu, broń wręcz w zwarciu)
+  weapon(s: GameState, x: number, y: number, p: number, color: string) {
     const c = this.ctx
-    switch (cls) {
-      case 'warrior': case 'paladin':
-        c.fillStyle = '#c8ccd4'; c.fillRect(x, y - 14 * p, 2 * p, 14 * p)
-        c.fillStyle = '#8a6a2a'; c.fillRect(x - 2 * p, y, 6 * p, 2 * p)
-        c.fillStyle = cls === 'paladin' ? '#ffe680' : '#7a2a2a'; c.fillRect(x - 16 * p, y - 6 * p, 6 * p, 9 * p)
-        break
-      case 'rogue':
-        c.fillStyle = '#c8ccd4'; c.fillRect(x, y - 7 * p, 2 * p, 7 * p); c.fillRect(x - 14 * p, y - 5 * p, 2 * p, 6 * p)
-        break
-      case 'hunter':
-        c.strokeStyle = '#7a4a22'; c.lineWidth = 2 * p; c.beginPath(); c.arc(x, y - 4 * p, 9 * p, -Math.PI / 2, Math.PI / 2); c.stroke()
+    const h = s.hero
+    const shooting = h.cls === 'hunter' && !!h.equip.ranged && !(s.phase === 'fight' && heroInMelee(s))
+    const it = shooting ? h.equip.ranged : h.equip.mainhand
+    const type = it?.weaponType ?? (h.cls === 'hunter' ? 'Bow' : h.cls === 'rogue' ? 'Dagger' : h.cls === 'warrior' || h.cls === 'paladin' ? 'Sword' : h.cls === 'shaman' ? 'Mace' : 'Staff')
+    const steel = '#c8ccd4', wood = '#7a4a22', grip = '#5a3a1a'
+    // druga ręka: tarcza albo broń
+    const off = h.equip.offhand
+    if (off?.weaponType === 'Shield') { c.fillStyle = h.cls === 'paladin' ? '#e0c060' : '#8a2a2a'; c.fillRect(x - 17 * p, y - 7 * p, 7 * p, 10 * p); c.fillStyle = '#d8d8d8'; c.fillRect(x - 14 * p, y - 4 * p, 1 * p, 4 * p) }
+    else if (off?.weaponType && off.weaponType !== 'Orb') { c.fillStyle = steel; c.fillRect(x - 14 * p, y - 6 * p, 2 * p, 7 * p) }
+    switch (type) {
+      case 'Bow':
+        c.strokeStyle = wood; c.lineWidth = 2 * p; c.beginPath(); c.arc(x, y - 4 * p, 9 * p, -Math.PI / 2, Math.PI / 2); c.stroke()
         c.fillStyle = '#ddd'; c.fillRect(x, y - 13 * p, 1, 18 * p)
         break
-      case 'shaman':
-        c.fillStyle = '#6a4a2a'; c.fillRect(x, y - 10 * p, 2 * p, 12 * p); c.fillStyle = '#8a8a9a'; c.fillRect(x - 2 * p, y - 13 * p, 6 * p, 4 * p)
+      case 'Crossbow':
+        c.fillStyle = wood; c.fillRect(x - 2 * p, y - 3 * p, 14 * p, 3 * p); c.strokeStyle = '#999'; c.lineWidth = 1.5 * p; c.beginPath(); c.moveTo(x + 10 * p, y - 9 * p); c.lineTo(x + 10 * p, y + 4 * p); c.stroke()
         break
-      default:
+      case 'Gun':
+        c.fillStyle = '#5a5a62'; c.fillRect(x, y - 4 * p, 15 * p, 2.5 * p); c.fillStyle = wood; c.fillRect(x - 3 * p, y - 3 * p, 6 * p, 5 * p)
+        break
+      case 'Thrown': case 'Wand':
+        c.fillStyle = type === 'Wand' ? '#c8a0ff' : steel; c.fillRect(x, y - 8 * p, 2 * p, 9 * p)
+        break
+      case 'Dagger': case 'Fist Weapon':
+        c.fillStyle = steel; c.fillRect(x, y - 8 * p, 2 * p, 8 * p); c.fillStyle = grip; c.fillRect(x - 1 * p, y, 4 * p, 2 * p)
+        break
+      case 'Sword': case 'Greatsword': {
+        const L = type === 'Greatsword' ? 20 : 14
+        c.fillStyle = steel; c.fillRect(x, y - L * p, 2 * p, L * p); c.fillStyle = '#8a6a2a'; c.fillRect(x - 2 * p, y, 6 * p, 2 * p)
+        break
+      }
+      case 'Axe': case 'Greataxe': {
+        const L = type === 'Greataxe' ? 20 : 14
+        c.fillStyle = wood; c.fillRect(x, y - L * p, 2 * p, L * p + 3 * p); c.fillStyle = steel; c.fillRect(x + 2 * p, y - L * p, 6 * p, 6 * p)
+        break
+      }
+      case 'Mace': case 'Maul': {
+        const L = type === 'Maul' ? 20 : 12
+        c.fillStyle = wood; c.fillRect(x, y - L * p, 2 * p, L * p + 3 * p); c.fillStyle = '#8a8a9a'; c.fillRect(x - 2 * p, y - (L + 3) * p, 6 * p, 5 * p)
+        break
+      }
+      case 'Polearm':
+        c.fillStyle = wood; c.fillRect(x, y - 22 * p, 2 * p, 30 * p); c.fillStyle = steel; c.fillRect(x - 2 * p, y - 26 * p, 6 * p, 5 * p)
+        break
+      default: // Staff
         c.fillStyle = '#6a4a2a'; c.fillRect(x, y - 18 * p, 2 * p, 26 * p)
         c.fillStyle = color === '#FFFFFF' ? '#ffe680' : color; c.fillRect(x - 1 * p, y - 21 * p, 4 * p, 4 * p)
     }
@@ -893,6 +957,57 @@ export class Scene {
     if (extra === 'bones') { c.fillStyle = '#f4f0e0'; for (let i = 0; i < 3; i++) c.fillRect(x - W / 2 + 1 * p, gy - legH - torsoH + (2 + i * 3) * p, W - 2 * p, 1 * p) }
     c.fillStyle = '#9a9aa2'
     c.fillRect(x - W / 2 - 5 * p, gy - legH - torsoH - 4 * p, 2 * p, 12 * p)
+  }
+
+  // Druid w formie: niedźwiedź, kot albo moonkin (kolor futra zależy od rasy, jak w Classicu)
+  druidForm(s: GameState, gy: number, moving: boolean, dt: number) {
+    const c = this.ctx
+    const p = this.px / 2
+    const ne = s.hero.race === 'nightelf'
+    const x = this.heroX + (this.heroLunge > 0 ? 6 : 0)
+    if (this.heroLunge > 0) this.heroLunge -= dt
+    if (this.castGlow > 0) this.castGlow -= dt
+    const walk = moving ? Math.sin(this.t * 12) : 0
+    const form = s.hero.form
+    c.save()
+    c.filter = 'drop-shadow(0 0 1px #000)'
+    if (form === 'bear') {
+      const col = ne ? '#4a3a5a' : '#6a4426'
+      this.shadow(x, gy, 16 * p)
+      const bw = 30 * p, bh = 15 * p, by = gy - 8 * p - bh
+      c.fillStyle = shade(col, -0.3)
+      for (let i = 0; i < 4; i++) c.fillRect(x - bw / 2 + 1 * p + i * (bw / 3.6), gy - 9 * p, 5 * p, 9 * p + (i % 2 ? walk : -walk) * p)
+      c.fillStyle = col
+      c.beginPath(); c.ellipse(x, by + bh / 2, bw / 2, bh / 2 + 2 * p, 0, 0, Math.PI * 2); c.fill()
+      c.fillRect(x - bw / 2 + 2 * p, by - 2 * p, bw * 0.5, 5 * p) // garb
+      const hx = x + bw / 2 - 4 * p
+      c.beginPath(); c.ellipse(hx + 3 * p, by + 3 * p, 7 * p, 6 * p, 0, 0, Math.PI * 2); c.fill()
+      c.fillStyle = shade(col, 0.25); c.fillRect(hx + 7 * p, by + 3 * p, 5 * p, 4 * p) // pysk
+      c.fillStyle = col; c.beginPath(); c.arc(hx, by - 3 * p, 2.5 * p, 0, Math.PI * 2); c.arc(hx + 6 * p, by - 3 * p, 2.5 * p, 0, Math.PI * 2); c.fill()
+      c.fillStyle = '#111'; c.fillRect(hx + 11 * p, by + 3 * p, 1.5 * p, 1.5 * p); c.fillRect(hx + 5 * p, by + 1 * p, 1.5 * p, 1.5 * p)
+    } else if (form === 'cat') {
+      this.shadow(x, gy, 13 * p)
+      this.quad(x, gy, ne ? '#3a2a4a' : '#b08a5a', walk, 1.1, false, 'cat')
+      // pręgi i ogon uniesiony
+      c.fillStyle = ne ? '#6a4a8a' : '#7a5a3a'
+      for (let i = 0; i < 3; i++) c.fillRect(x - 6 * p + i * 5 * p, gy - 7 * 1.1 * p - 7 * 1.1 * p, 1.5 * p, 4 * p)
+    } else {
+      // Moonkin: pierzasta sowa na dwóch łapach
+      const col = ne ? '#6a5a8a' : '#8a6a4a'
+      this.shadow(x, gy, 13 * p)
+      c.fillStyle = shade(col, -0.35)
+      c.fillRect(x - 6 * p, gy - 8 * p + walk * p, 4 * p, 8 * p - walk * p); c.fillRect(x + 2 * p, gy - 8 * p - walk * p, 4 * p, 8 * p + walk * p)
+      c.fillStyle = col
+      c.beginPath(); c.ellipse(x, gy - 20 * p, 11 * p, 13 * p, 0, 0, Math.PI * 2); c.fill()
+      c.fillStyle = shade(col, 0.35); c.beginPath(); c.ellipse(x + 2 * p, gy - 17 * p, 6 * p, 8 * p, 0, 0, Math.PI * 2); c.fill()
+      c.fillStyle = col; c.beginPath(); c.arc(x + 1 * p, gy - 35 * p, 8 * p, 0, Math.PI * 2); c.fill()
+      c.beginPath(); c.moveTo(x - 6 * p, gy - 40 * p); c.lineTo(x - 9 * p, gy - 48 * p); c.lineTo(x - 2 * p, gy - 42 * p); c.fill()
+      c.beginPath(); c.moveTo(x + 6 * p, gy - 40 * p); c.lineTo(x + 10 * p, gy - 48 * p); c.lineTo(x + 3 * p, gy - 42 * p); c.fill()
+      c.fillStyle = '#ffe070'; c.fillRect(x + 1 * p, gy - 37 * p, 3 * p, 3 * p); c.fillRect(x + 5 * p, gy - 37 * p, 3 * p, 3 * p)
+      c.fillStyle = '#d0a040'; c.beginPath(); c.moveTo(x + 9 * p, gy - 34 * p); c.lineTo(x + 13 * p, gy - 32 * p); c.lineTo(x + 9 * p, gy - 30 * p); c.fill()
+      if (this.castGlow > 0) { c.globalAlpha = this.castGlow; c.fillStyle = this.castColor; c.beginPath(); c.arc(x + 12 * p, gy - 24 * p, 4 * p, 0, Math.PI * 2); c.fill() }
+    }
+    c.restore()
   }
 
   quad(x: number, gy: number, color: string, walk: number, scale: number, facingLeft = false, kind?: 'cat' | 'boar') {

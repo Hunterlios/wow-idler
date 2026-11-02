@@ -1,11 +1,12 @@
 // Akcje gracza: miasto mapy (zadania + trener), stolica (trener + sprzedawca), podróże.
 import { classById, ranksOf, trainCost, WEAPON_SKILL_COST, WEAPON_SKILL_LVL, WEAPON_SKILL_PL } from '../data/classes'
 import { zoneById } from '../data/zones'
-import { BAGS_FOR_SALE, FOODS, makeBag, makeFood } from './items'
+import { BAGS_FOR_SALE, FOODS, KITS, makeBag, makeFood, makeKit, repairCost } from './items'
+import { raceById } from '../data/races'
 import { addToInv, equipBag, freeSlots, removeItems, STACK } from './inventory'
 import { questXp, questReady, isQuestItem } from './quests'
-import { gainXp, log, moveTo, stats } from './sim'
-import { canTravel, capitalOf, capitalZone, progOf, townOf } from './world'
+import { gainXp, log, moveTo, stats, spiritRes } from './sim'
+import { canTravel, capitalOf, capitalZone, capitalHere, homeOf, progOf, townOf, zoneOfCapital } from './world'
 import type { GameEvent, GameState, Quest } from './types'
 
 type Emit = (e: GameEvent) => void
@@ -15,6 +16,7 @@ export const HEARTH_CD = 30 * 60 // Hearthstone (w Classicu 60 min; w idlerze 30
 export function enterTown(s: GameState) {
   const z = zoneById(s.loc.zone)
   if (s.phase === 'travel' || !townOf(z, s.hero.faction)) return false
+  spiritRes(s, noop, 'Your ghost enters the town. ')
   s.where = 'town'
   s.mob = null
   s.hero.casting = null
@@ -23,17 +25,22 @@ export function enterTown(s: GameState) {
 // Stolica: wchodzisz pieszo, jeśli jesteś na jej mapie; z innych map tylko Hearthstone (cooldown),
 // który przenosi postać na mapę stolicy.
 export function enterCapital(s: GameState): string | null {
-  if (s.phase === 'travel') return 'Jesteś w podróży.'
-  const cz = capitalZone(s)
-  if (s.loc.zone !== cz) {
+  if (s.phase === 'travel') return 'You are travelling.'
+  if (!capitalHere(s) && !s.home) return `Your Hearthstone is not set yet. Walk to ${raceById(s.hero.race).start.capital} (${zoneById(zoneOfCapital(raceById(s.hero.race).start.capital)).name}) or another capital of your faction and set it there.`
+  if (!capitalHere(s) && (s.hero.cds.hearth ?? 0) > 0) return `Hearthstone is ready in ${Math.ceil(s.hero.cds.hearth / 60)} min. You can also walk to the capital (${zoneById(capitalZone(s)).name}).`
+  spiritRes(s, noop, 'Your ghost enters the capital. ')
+  const here = capitalHere(s)
+  if (here) { s.inCap = here } else {
+    const cz = capitalZone(s)
     const cd = s.hero.cds.hearth ?? 0
-    if (cd > 0) return `Hearthstone odnowi się za ${Math.ceil(cd / 60)} min. Do stolicy (${zoneById(cz).name}) możesz też dojść z mapy.`
+    if (cd > 0) return `Hearthstone is ready in ${Math.ceil(cd / 60)} min. You can also walk to the capital (${zoneById(cz).name}).`
     s.hero.cds.hearth = HEARTH_CD
     s.loc = { zone: cz, sub: 0 }
     if (!s.unlocked.includes(cz)) s.unlocked.push(cz)
     progOf(s, cz)
     s.hero.totems = []
-    log(s, `Hearthstone: przenosisz się do ${capitalOf(s)} (${zoneById(cz).name}).`, '#69ccf0')
+    s.inCap = homeOf(s)
+    log(s, `Hearthstone: you return to ${homeOf(s)} (${zoneById(cz).name}).`, '#69ccf0')
   }
   s.where = 'capital'
   s.mob = null
@@ -41,13 +48,20 @@ export function enterCapital(s: GameState): string | null {
   return null
 }
 export const hearthReady = (s: GameState) => !(s.hero.cds.hearth > 0)
+// Przypisanie Hearthstone do stolicy, w której jesteś (u karczmarza)
+export function bindHearth(s: GameState): string | null {
+  if (s.where !== 'capital' || !s.inCap) return 'You can set your Hearthstone in a capital city.'
+  s.home = s.inCap
+  log(s, `Hearthstone set to: ${s.home}.`, '#ffd100')
+  return null
+}
 export function leaveTown(s: GameState) {
   s.where = 'field'
   s.phase = 'walk'
   s.phaseT = 1.5
 }
 export function travel(s: GameState, zone: string, sub: number, emit: Emit = noop): string | null {
-  if (!canTravel(s, zone, sub)) return 'Ta podstrefa jest jeszcze zablokowana.'
+  if (!canTravel(s, zone, sub)) return 'This subzone is still locked.'
   return moveTo(s, zone, sub, emit)
 }
 
@@ -69,11 +83,11 @@ export function trainerRows(s: GameState): TrainRow[] {
 }
 export function train(s: GameState, id: string): string | null {
   const row = trainerRows(s).find((r) => r.id === id)
-  if (!row || row.status !== 'available') return 'Nie możesz się tego jeszcze nauczyć.'
-  if (s.hero.copper < row.cost) return 'Za mało pieniędzy.'
+  if (!row || row.status !== 'available') return 'You can\'t learn this yet.'
+  if (s.hero.copper < row.cost) return 'Not enough money.'
   s.hero.copper -= row.cost
   s.hero.trained[id] = row.rankLvl
-  log(s, `Nauczono: ${row.name} (Rank ${row.rank})`, '#ffd100')
+  log(s, `Learned: ${row.name} (Rank ${row.rank})`, '#ffd100')
   return null
 }
 export function trainAll(s: GameState) {
@@ -99,12 +113,13 @@ export function weaponRows(s: GameState): WeaponRow[] {
 }
 export function trainWeapon(s: GameState, type: string): string | null {
   const row = weaponRows(s).find((r) => r.type === type)
-  if (!row || row.status !== 'available') return 'Nie możesz się tego nauczyć.'
-  if (s.where !== 'capital') return 'Weapon Master jest w stolicy.'
-  if (s.hero.copper < row.cost) return 'Za mało pieniędzy.'
+  if (!row || row.status !== 'available') return 'You can\'t learn this.'
+  if (s.where !== 'capital') return 'The Weapon Master is in a capital city.'
+  if (s.hero.copper < row.cost) return 'Not enough money.'
   s.hero.copper -= row.cost
   s.hero.weaponSkills.push(type)
-  log(s, `Weapon Master: nauczono ${row.name}.`, '#ffd100')
+  s.hero.wskill[type] = 1 // jak w Classicu: nowa broń zaczyna od 1 i trzeba ją wyćwiczyć
+  log(s, `Weapon Master: learned ${row.name} (skill 1/${s.hero.level * 5}, it grows as you fight with this weapon).`, '#ffd100')
   return null
 }
 
@@ -125,19 +140,29 @@ export function buyBack(s: GameState, i: number): string | null {
   const it = s.buyback[i]
   if (!it || s.where === 'field') return null
   const price = it.value * (it.count ?? 1)
-  if (s.hero.copper < price) return 'Za mało pieniędzy.'
-  if (!addToInv(s.hero, it)) return 'Brak miejsca w torbach.'
+  if (s.hero.copper < price) return 'Not enough money.'
+  if (!addToInv(s.hero, it)) return 'Not enough space in your bags.'
   s.hero.copper -= price
   s.totals.copper -= price
   s.buyback.splice(i, 1)
+  return null
+}
+export function buyKit(s: GameState, name: string, n: number): string | null {
+  const k = KITS.find((x) => x.name === name)
+  if (!k || s.where === 'field') return null
+  if (s.hero.level < k.lvl) return `Requires level ${k.lvl}.`
+  const cost = k.price * n
+  if (s.hero.copper < cost) return 'Not enough money.'
+  if (!addToInv(s.hero, makeKit(s.itemSeq++, k, n))) return 'Not enough space in your bags.'
+  s.hero.copper -= cost
   return null
 }
 export function buyFood(s: GameState, name: string, n: number): string | null {
   const f = FOODS.find((x) => x.name === name)
   if (!f || s.where === 'field') return null
   const cost = f.price * n
-  if (s.hero.copper < cost) return 'Za mało pieniędzy.'
-  if (!addToInv(s.hero, makeFood(s.itemSeq++, f, n))) return 'Brak miejsca w torbach.'
+  if (s.hero.copper < cost) return 'Not enough money.'
+  if (!addToInv(s.hero, makeFood(s.itemSeq++, f, n))) return 'Not enough space in your bags.'
   s.hero.copper -= cost
   return null
 }
@@ -165,27 +190,28 @@ export function sellJunk(s: GameState) {
 export function buyBag(s: GameState, size: number): string | null {
   const b = BAGS_FOR_SALE.find((x) => x.size === size)
   if (!b || s.where === 'field') return null
-  if (s.hero.copper < b.price) return 'Za mało pieniędzy.'
+  if (s.hero.copper < b.price) return 'Not enough money.'
   const bag = makeBag(s.itemSeq++, size)
   if (s.hero.bags.some((x) => !x)) equipBag(s.hero, bag)
-  else if (!addToInv(s.hero, bag)) return 'Brak miejsca.'
+  else if (!addToInv(s.hero, bag)) return 'Not enough space.'
   s.hero.copper -= b.price
-  log(s, `Kupiono: ${b.name} (${size} slotów)`, '#ffffff')
+  log(s, `Bought: ${b.name} (${size} slots)`, '#ffffff')
   return null
 }
 
 // ---------- zadania
 export function turnIn(s: GameState, q: Quest, emit: Emit = noop): string | null {
-  if (!questReady(q)) return 'Zadanie nie jest ukończone.'
-  if (s.where !== 'town' || s.loc.zone !== q.zone) return `Oddaj w ${townOf(zoneById(q.zone), s.hero.faction)}.`
-  if (q.reward && freeSlots(s.hero) < 1) return 'Zrób miejsce w torbach na nagrodę.'
+  if (!questReady(q)) return 'The quest is not complete.'
+  if (s.where !== 'town' || s.loc.zone !== q.zone) return `Turn it in at ${townOf(zoneById(q.zone), s.hero.faction)}.`
+  if (q.reward && freeSlots(s.hero) < 1) return 'Make room in your bags for the reward.'
   s.quests = s.quests.filter((x) => x.id !== q.id)
   s.questsDone.push(q.id)
   if (q.kind === 'collect') removeItems(s.hero, isQuestItem(q), q.need)
   s.totals.quests++
   const xp = questXp(s, q)
-  s.hero.copper += q.copper
-  s.totals.copper += q.copper
+  const gold = Math.round(q.copper * (1 + (raceById(s.hero.race).mods.questGold ?? 0)))
+  s.hero.copper += gold
+  s.totals.copper += gold
   if (q.reward) addToInv(s.hero, { ...q.reward, id: s.itemSeq++ })
   log(s, `Oddano: ${q.title} (+${xp} XP)`, '#ffd100')
   gainXp(s, xp, emit)
@@ -195,3 +221,24 @@ export function turnIn(s: GameState, q: Quest, emit: Emit = noop): string | null
 
 export const placeName = (s: GameState) =>
   s.where === 'capital' ? capitalOf(s) : s.where === 'town' ? townOf(zoneById(s.loc.zone), s.hero.faction) ?? '' : ''
+
+// ---------- naprawa u kupca (jak u kowala / kupca w Classicu)
+export function repairDiscount(s: GameState) { return raceById(s.hero.race).mods.repairPct ?? 0 }
+export function repairAllCost(s: GameState) {
+  const h = s.hero
+  const disc = repairDiscount(s)
+  let sum = 0
+  for (const it of [...Object.values(h.equip), ...h.inv]) if (it) sum += repairCost(it, disc)
+  return sum
+}
+export function repairAll(s: GameState): string | null {
+  if (s.where === 'field') return 'Repairs are done at a vendor in town.'
+  const cost = repairAllCost(s)
+  if (!cost) return 'Nothing to repair.'
+  if (s.hero.copper < cost) return 'Not enough money for repairs.'
+  s.hero.copper -= cost
+  for (const it of [...Object.values(s.hero.equip), ...s.hero.inv]) if (it && it.dur != null) delete it.dur
+  stats(s.hero)
+  log(s, 'Gear repaired.', '#ffffff')
+  return null
+}

@@ -1,4 +1,4 @@
-# Azeroth Idle (demo 0.6)
+# Azeroth Idle (demo 0.9.1)
 
 Idle RPG w klimacie WoW Classic. Siedzi jako pasek nad paskiem zadań Windows i gra się sam: bohater chodzi po strefach, walczy, zbiera łup, robi zadania, awansuje i wędruje dalej trasą levelowania swojej frakcji. Gra liczy się też wtedy, gdy jest zamknięta.
 
@@ -71,6 +71,41 @@ npm run balance    # symulacja 24 h gry (gracz zagląda do miasta co godzinę) d
 - **Pasek buffów** przy ramce postaci: nasycenia broni, pieczęcie, aury, buffy z cooldownów, totemy, Well Fed. Na pasku akcji zostają tylko umiejętności rzucane.
 - **Styl walki hybryd** (szaman, paladyn) w księdze (P): Mieszany (czary z dystansu, w zwarciu ciosy wręcz i tylko natychmiastowe czary), Wręcz (od razu biegnie do wroga), Czarami. Postać bez czarów z dystansu biegnie do wroga sama.
 - **Torby:** przycisk „Złącz” przywraca wszystkie torby na miejsce.
+
+### Nowe w 0.7
+- **Leczenie działa:** klasy z czarami leczącymi (Holy Light, Healing Wave, Heal, Healing Touch...) po walce leczą się czarem (widać rzucanie), a jedzą dopiero, gdy brakuje many. W walce leczą się poniżej 50% zdrowia.
+- **Tooltipy umiejętności** pokazują widełki obrażeń / leczenia, efekty buffów i czym się skalują (broń, siła ataku, moc czarów, ranga).
+- **Dziennik zadań:** przycisk „Idź” prowadzi na miejsce zadania (z oknem podróży).
+- **Trasy:** marsz idzie przez sąsiednie mapy (odkrywają się po drodze), dłuższe czasy dalekich podróży. Podpowiedź portu wybiera najszybszą drogę (np. z Mulgore do Tirisfal przez zeppelin w Durotar).
+- **Wszystkie transporty z Classica:** statki Menethil–Auberdine, Menethil–Theramore, Rut'theran–Auberdine, Booty Bay–Ratchet; zeppeliny Orgrimmar–Undercity, Orgrimmar–Grom'gol, Undercity–Grom'gol; Deeprun Tram Stormwind–Ironforge.
+- **Stolice frakcji:** do każdej stolicy swojej frakcji wejdziesz pieszo z jej mapy. Hearthstone przypiszesz w dowolnej z nich (nie w stolicy przeciwnej frakcji).
+- **Okna nie uciekają z ekranu:** po przeciągnięciu, zmianie rozdzielczości albo monitora wracają na ekran.
+- **Aplikacja:** gra jest widoczna na pasku zadań, a pasek przeciągnięty na inny monitor przenosi tam grę. Menu ikony w zasobniku ma „Przywróć pasek i okna na ekran”.
+
+### Nowe w 0.8
+- **Skalowanie jak w Classicu:** Strength i Agility dają siłę ataku według klasy, Intellect daje manę i krytyki czarów (nie moc). Czary skalują się rangą i mocą czarów z przedmiotów („of Sorcery”, „of Healing”, „of ... Wrath”) według współczynnika czaru.
+- **Umiejętność broni:** każdy typ broni ma poziom (limit = poziom × 5), który rośnie od walki. Od różnicy z obroną wroga zależą pudła, uniki, parowania i ciosy ześlizgujące się. Nowa broń od Weapon Mastera zaczyna od 1. Specjalizacje rasowe dają +5.
+- **Śmierć:** duch wraca do zwłok (postęp zostaje) albo wskrzesza się od razu u Ducha Uzdrowiciela (−25% wytrzymałości, postęp podstrefy od nowa). Podróż lub wejście do miasta jako duch też oznacza Ducha Uzdrowiciela. Boss, który cię pokonał, wraca po kilku minutach.
+- **Wytrzymałość ekwipunku:** przedmiot z wytrzymałością 0 nie daje bonusów. Naprawa u kupca albo zestawem naprawczym (Light / Medium / Heavy / Thorium Repair Kit): postać sama naprawia nim zepsute przedmioty przy odpoczynku, tak jak je i pije.
+- **Rasowe zdolności działają w walce** i są widoczne w pasku buffów oraz w księdze (Blood Fury, Berserking, Stoneform, War Stomp, Shadowmeld, Escape Artist, Perception, Will of the Forsaken). Pasywki bez mechaniki dostały odpowiedniki (np. Cultivation: szybsze podróże).
+- **Walka:** komunikaty pudła / uniku / parowania, DoT-y i osłabienia widoczne na wrogu, Moonfire z obrażeniami od razu i bez odnawiania w trakcie, pasek ataku także u castera bijącego wręcz, druid wygląda jak niedźwiedź / kot / moonkin.
+- Deeprun Tram tylko z Dun Morogh (Ironforge), nie z Coldridge Valley. Wybór ekranu tylko w ustawieniach gry.
+
+### Nowe w 0.9
+- **Gra po angielsku** (interfejs, opisy umiejętności, talentów, ras, zadania, komunikaty).
+- **Hearthstone** trzeba najpierw przypisać w stolicy, do której postać dojdzie pieszo (nowa postać nie teleportuje się od razu).
+- **Łowca:** wybór stylu walki (dystans z pupilem trzymającym wroga / wręcz). Bez pupila przy wrogu w zwarciu przechodzi na broń do walki wręcz. Postać trzyma w ręce broń, której naprawdę używa.
+- **Pasek:** grubszy pasek rzucania i auto ataku z czasem („Auto Shot (ranged)” / „Auto Attack (melee)”), liczniki odnowienia na przyciskach umiejętności.
+- **Debuffy na wrogu** (DoT-y, klątwy, ogłuszenie, spowolnienie) jako ikony z licznikiem pod paskiem zdrowia wroga.
+- **Zestawy naprawcze** używane także między walkami, gdy założony przedmiot jest zepsuty.
+- **Okno Skills (K):** umiejętności broni (w przyszłości profesje).
+- Nowe, czytelniejsze ikony menu. Wszystkie torby tej samej szerokości, wyrównane do prawej.
+
+### Nowe w 0.9.1
+- **Grafiki gracza z folderu `assets/`** (nie trafiają do repozytorium ani paczki): ikony umiejętności, przedmiotów, menu, ras i klas (`assets/icons`) oraz mapy kontynentów (`assets/graphics`). Brakujące pliki zastępują rysowane ikony.
+  - Aplikacja (exe) czyta `assets` obok `Azeroth Idle.exe` albo w folderze projektu.
+  - Wersja przeglądarkowa: po dodaniu plików uruchom `node scripts/assets-manifest.mjs`.
+- **Mapa świata na grafikach kontynentów** (zakładki Eastern Kingdoms / Kalimdor), mapy rozmieszczone według prawdziwych granic.
 
 Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classica, bez plików Blizzarda.
 

@@ -128,7 +128,19 @@ export function makeGear(rng: Rng, seq: number, hero: Hero, ilvlIn: number, forc
     item.armor = Math.round(5 + ARMOR_K[at] * ilvl * SLOT_K[slot] * RAR_K[rarity])
     name = `${MATERIAL[at][TIER(ilvl)]} ${NOUN[at][slot as ArmorSlot]}`
   }
-  if (rarity >= 2) {
+  // sufiksy z mocą czarów jak w Classicu: "of Sorcery" (Intellect, Stamina, moc), "of Healing" / "of ... Wrath" (sama moc)
+  const spellish = (cls.weights.sp ?? 0) > 0
+  if (rarity >= 2 && slot !== 'ranged' && ilvl >= 8 && rng.chance(spellish ? 0.35 : 0.06)) {
+    const budget = Math.max(1, ilvl * 0.45 * SLOT_K[slot] * (rarity === 2 ? 1 : rarity === 3 ? 1.35 : 1.7))
+    const SCH: Record<string, string> = { mage: 'Fiery', warlock: 'Shadow', priest: 'Holy', druid: "Nature's", shaman: "Nature's", paladin: 'Holy' }
+    const kind = rng.pick(['sorcery', 'wrath', 'healing'] as const)
+    item.stats = {}
+    if (kind === 'sorcery') { item.stats.int = Math.max(1, Math.round(budget * 0.35)); item.stats.sta = Math.max(1, Math.round(budget * 0.3)); item.sp = Math.max(1, Math.round(budget * 0.4)) }
+    else item.sp = Math.max(1, Math.round(budget * 0.85))
+    const suf = kind === 'sorcery' ? 'of Sorcery' : kind === 'healing' ? 'of Healing' : `of ${SCH[cls.id] ?? 'Arcane'} Wrath`
+    if (rarity === 2) name = `${name} ${suf}`
+    else name = `${rng.pick(rarity === 3 ? RARE_PREFIX : EPIC_PREFIX)} ${name}`
+  } else if (rarity >= 2) {
     let suffix = rng.pick(SUFFIXES)
     if (rng.chance(0.5)) {
       const w = cls.weights
@@ -160,7 +172,7 @@ export function itemScore(hero: Hero, it: Item | undefined) {
   if (!it) return 0
   const c = classById(hero.cls)
   const w = c.weights
-  let s = 0
+  let s = (w.sp ?? 0) * (it.sp ?? 0)
   for (const [k, v] of Object.entries(it.stats ?? {})) s += (w[k as K] ?? 0) * (v ?? 0)
   s += (w.armor ?? 0.01) * (it.armor ?? 0)
   // DPS liczy się tylko w broni, której klasa realnie używa do białych ataków
@@ -241,20 +253,62 @@ export const FOODS: FoodDef[] = [
   { name: 'Sweet Nectar', kind: 'drink', lvl: 25, amt: 1344, price: 25 },
   { name: 'Moonberry Juice', kind: 'drink', lvl: 35, amt: 1992, price: 40 },
   { name: 'Morning Glory Dew', kind: 'drink', lvl: 45, amt: 2934, price: 60 },
-  { name: 'Herb Baked Egg', kind: 'buff', lvl: 1, amt: 0, price: 50, buff: { name: 'Well Fed', fx: { sta: 3, spi: 3 }, text: '+3 Stamina i Spirit' } },
-  { name: 'Crocolisk Steak', kind: 'buff', lvl: 15, amt: 0, price: 200, buff: { name: 'Well Fed', fx: { sta: 6, spi: 6 }, text: '+6 Stamina i Spirit' } },
-  { name: 'Curiously Tasty Omelet', kind: 'buff', lvl: 25, amt: 0, price: 500, buff: { name: 'Well Fed', fx: { sta: 8, spi: 8 }, text: '+8 Stamina i Spirit' } },
+  { name: 'Herb Baked Egg', kind: 'buff', lvl: 1, amt: 0, price: 50, buff: { name: 'Well Fed', fx: { sta: 3, spi: 3 }, text: '+3 Stamina and Spirit' } },
+  { name: 'Crocolisk Steak', kind: 'buff', lvl: 15, amt: 0, price: 200, buff: { name: 'Well Fed', fx: { sta: 6, spi: 6 }, text: '+6 Stamina and Spirit' } },
+  { name: 'Curiously Tasty Omelet', kind: 'buff', lvl: 25, amt: 0, price: 500, buff: { name: 'Well Fed', fx: { sta: 8, spi: 8 }, text: '+8 Stamina and Spirit' } },
   { name: 'Grilled Squid', kind: 'buff', lvl: 35, amt: 0, price: 1000, buff: { name: 'Well Fed', fx: { agi: 10 }, text: '+10 Agility' } },
-  { name: 'Nightfin Soup', kind: 'buff', lvl: 35, amt: 0, price: 1000, buff: { name: 'Well Fed', fx: { castRegen: 0.1 }, text: '+10% regeneracji many w walce' } },
-  { name: 'Monster Omelet', kind: 'buff', lvl: 40, amt: 0, price: 1500, buff: { name: 'Well Fed', fx: { sta: 12, spi: 12 }, text: '+12 Stamina i Spirit' } },
+  { name: 'Nightfin Soup', kind: 'buff', lvl: 35, amt: 0, price: 1000, buff: { name: 'Well Fed', fx: { castRegen: 0.1 }, text: '+10% in-combat mana regeneration' } },
+  { name: 'Monster Omelet', kind: 'buff', lvl: 40, amt: 0, price: 1500, buff: { name: 'Well Fed', fx: { sta: 12, spi: 12 }, text: '+12 Stamina and Spirit' } },
   { name: 'Runn Tum Tuber Surprise', kind: 'buff', lvl: 45, amt: 0, price: 2000, buff: { name: 'Well Fed', fx: { int: 10 }, text: '+10 Intellect' } },
   { name: 'Smoked Desert Dumplings', kind: 'buff', lvl: 45, amt: 0, price: 2000, buff: { name: 'Well Fed', fx: { str: 20 }, text: '+20 Strength' } },
   { name: "Dirge's Kickin' Chimaerok Chops", kind: 'buff', lvl: 55, amt: 0, price: 4000, buff: { name: 'Well Fed', fx: { sta: 25 }, text: '+25 Stamina' } },
 ]
 export const WELL_FED_SECS = 15 * 60
+
+// Zestawy naprawcze (u kupca): postać sama naprawia nimi zepsute przedmioty podczas odpoczynku,
+// jak je i pije. Jeden zestaw = jeden zepsuty przedmiot do pełnej wytrzymałości.
+export type KitDef = { name: string; lvl: number; maxIlvl: number; price: number }
+export const KITS: KitDef[] = [
+  { name: 'Light Repair Kit', lvl: 1, maxIlvl: 20, price: 50 },
+  { name: 'Medium Repair Kit', lvl: 15, maxIlvl: 35, price: 400 },
+  { name: 'Heavy Repair Kit', lvl: 30, maxIlvl: 50, price: 1500 },
+  { name: 'Thorium Repair Kit', lvl: 45, maxIlvl: 70, price: 3500 },
+]
+export function makeKit(seq: number, def: KitDef, count = 1): Item {
+  return { id: seq, name: def.name, rarity: 1, ilvl: def.lvl, value: Math.max(1, Math.round(def.price / 4)), count, kit: def.maxIlvl }
+}
 export function makeFood(seq: number, def: FoodDef, count = 1): Item {
   return { id: seq, name: def.name, rarity: 1, ilvl: def.lvl, value: Math.max(1, Math.round(def.price / 4)), count, food: { kind: def.kind, lvl: def.lvl, amt: def.amt, buff: def.buff } }
 }
 export function makeQuestItem(seq: number, name: string, questId: string): Item {
   return { id: seq, name, rarity: 1, ilvl: 1, value: 0, quest: questId, count: 1 }
+}
+
+// ---------------------------------------------------------------- wytrzymałość i naprawa (jak w Classicu)
+// Maksymalna wytrzymałość zależy od slotu i typu pancerza; biżuteria, peleryna i koszula jej nie mają.
+const DUR_SLOT: Partial<Record<ItemSlot, number>> = { head: 60, shoulder: 60, chest: 100, wrist: 35, hands: 35, waist: 35, legs: 75, feet: 50, mainhand: 75, twohand: 100, ranged: 75, offhand: 60 }
+const DUR_ARMOR: Record<ArmorType, number> = { cloth: 0.7, leather: 0.85, mail: 1, plate: 1.2 }
+export function maxDur(it: Item): number {
+  if (!it.slot) return 0
+  if (it.slot === 'offhand' && it.weaponType !== 'Shield') return 0
+  const base = it.slot === 'offhand' ? 100 : DUR_SLOT[it.slot] ?? 0
+  return Math.round(base * (it.armorType ? DUR_ARMOR[it.armorType] : 1))
+}
+export const curDur = (it: Item) => (it.dur == null ? maxDur(it) : it.dur)
+export const isBroken = (it: Item | undefined | null) => !!it && maxDur(it) > 0 && it.dur === 0
+// Utrata wytrzymałości (ułamek maksimum) na założonych przedmiotach
+export function damageGear(hero: Hero, frac: number) {
+  for (const it of Object.values(hero.equip)) {
+    if (!it) continue
+    const m = maxDur(it)
+    if (!m) continue
+    it.dur = Math.max(0, curDur(it) - Math.ceil(m * frac))
+  }
+}
+// Koszt naprawy jednego punktu: rośnie z poziomem i jakością przedmiotu
+const REP_RAR = [0.5, 1, 1.2, 1.5, 2]
+export function repairCost(it: Item, discount = 0) {
+  const miss = maxDur(it) - curDur(it)
+  if (miss <= 0) return 0
+  return Math.max(1, Math.round(miss * (Math.pow(it.ilvl, 1.5) * 0.04 + 0.5) * REP_RAR[it.rarity] * (1 - discount)))
 }

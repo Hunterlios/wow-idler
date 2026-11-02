@@ -93,13 +93,15 @@ export type Derived = Stats & {
   dodge: number
   weaponDps: number
   weaponSpeed: number
-  spellMult: number
+  melee: { dps: number; speed: number; ap: number } // broń do walki wręcz (łowca: ręka główna zamiast łuku)
+  spellMult: number // siła rang czarów rosnąca z poziomem (jak bazowe obrażenia kolejnych rang w Classicu)
+  sp: number // moc czarów: "+X do obrażeń i leczenia czarami" z przedmiotów i talentów
   haste: number
   m: Mods // talenty + buffy: dmg, meleeDmg, spellDmg, school:*, ab:*, heal, cost, pet, regen, resGen, critDmg, dot, aoe, shield, dr, lifesteal, castRegen, instant, energy, noPet, shadow
   dr: (mobLvl: number) => number
 }
 
-const FLAT_SCALED = new Set(['ap', 'sta', 'int', 'spi', 'all', 'str', 'agi'])
+const FLAT_SCALED = new Set(['ap', 'sta', 'int', 'spi', 'all', 'str', 'agi', 'sp'])
 
 export function derive(h: Hero): Derived {
   const r = raceById(h.race)
@@ -108,7 +110,7 @@ export function derive(h: Hero): Derived {
   const g = grants(h)
   const tf = talentFx(h.cls, h.talents ?? {})
   const m: Mods = { ...tf }
-  const flat = { ap: 0, sta: 0, int: 0, spi: 0, all: 0, str: 0, agi: 0 }
+  const flat = { ap: 0, sta: 0, int: 0, spi: 0, all: 0, str: 0, agi: 0, sp: 0 }
   let armorPct = tf.armor ?? 0
   let allPct = 0
   const apply = (fx: BuffFx, scale: number) => {
@@ -123,6 +125,7 @@ export function derive(h: Hero): Derived {
   }
   for (const { fx, scale } of activeBuffs(h, g)) apply(fx, scale)
   if (h.wellFed && h.wellFed.left > 0) apply(h.wellFed.fx, 1)
+  if ((h.buffs.perception ?? 0) > 0) m.dmg = (m.dmg ?? 0) + 0.1 // Perception (człowiek)
   if (tf.lonewolf && h.cls === 'hunter' && h.disabled?.pet) m.dmg = (m.dmg ?? 0) + tf.lonewolf
   const s: Stats = { str: 0, agi: 0, sta: 0, int: 0, spi: 0 }
   for (const k of Object.keys(s) as (keyof Stats)[]) s[k] = r.base[k] + c.bonus[k] + c.growth[k] * (L - 1) + flat.all
@@ -134,13 +137,15 @@ export function derive(h: Hero): Derived {
   let gearArmor = 0
   let weaponDps = 1 + 0.35 * L
   let weaponSpeed = c.style === 'ranged' ? 2.8 : 2.4
+  let gearSp = 0
   for (const it of Object.values(h.equip)) {
-    if (!it) continue
+    if (!it || it.dur === 0) continue // zepsuty przedmiot nie daje bonusów
     for (const [k, v] of Object.entries(it.stats ?? {})) s[k as keyof Stats] += v ?? 0
     gearArmor += it.armor ?? 0
+    gearSp += it.sp ?? 0
   }
   const wpn = c.id === 'hunter' ? h.equip.ranged ?? h.equip.mainhand : h.equip.mainhand
-  if (wpn?.dps) { weaponDps = wpn.dps; weaponSpeed = wpn.speed ?? 2.4 }
+  if (wpn?.dps && wpn.dur !== 0) { weaponDps = wpn.dps; weaponSpeed = wpn.speed ?? 2.4 }
   // formy druida
   const form = h.cls === 'druid' ? h.form : 'caster'
   if (form === 'bear') { weaponDps = 1.5 + 0.78 * L; weaponSpeed = 2.5; armorPct += 1.8; s.sta *= 1.25 }
@@ -157,22 +162,40 @@ export function derive(h: Hero): Derived {
   const res = resourceOf(h)
   const maxRes = res === 'mana' && c.mana ? Math.round(c.mana[0] + c.mana[1] * (L - 1) + Math.min(20, s.int) + 15 * Math.max(0, s.int - 20)) : 100
 
-  let ap = c.id === 'hunter' ? s.agi * 2 + L * 2 - 10 : c.id === 'rogue' || form === 'cat' ? s.str + s.agi + L * 2 - 20 : s.str * 2 + L * 3 - 20
-  if (form === 'bear' || form === 'cat') ap += L * 3
+  // Siła ataku jak w Classicu: wojownik / paladyn / szaman 2 za Strength, łotr 1 za Strength i Agility,
+  // łowca (dystans) 2 za Agility, druid 2 za Strength (w formie kota też 1 za Agility), mag / kapłan / warlock 1 za Strength
+  let ap = c.id === 'hunter' ? s.agi * 2 + L * 2 - 10
+    : c.id === 'rogue' ? s.str + s.agi + L * 2 - 20
+    : form === 'cat' ? s.str * 2 + s.agi + L * 2 - 20
+    : c.id === 'druid' ? s.str * 2 - 20
+    : c.id === 'mage' || c.id === 'priest' || c.id === 'warlock' ? s.str - 10
+    : s.str * 2 + L * 3 - 20
+  if (form === 'bear') ap += L * 6
+  if (form === 'cat') ap += L * 3
   ap += flat.ap + s.int * (tf.intAp ?? 0)
   ap *= 1 + (tf.ap ?? 0)
   if ((h.buffs.bloodfury ?? 0) > 0) ap *= 1.25
   const armor = Math.round((gearArmor + s.agi * 2) * (1 + armorPct))
-  const crit = 0.05 + s.agi / (c.id === 'rogue' || c.id === 'hunter' || form === 'cat' ? 29 : 20) / 100 + (m.crit ?? 0) + (h.race === 'human' ? 0.01 : 0)
+  const crit = 0.05 + s.agi / (c.id === 'rogue' || c.id === 'hunter' || form === 'cat' ? 29 : 20) / 100 + (m.crit ?? 0)
   const spellCrit = 0.01 + s.int / 60 / 100 + (m.spellCrit ?? 0)
   const dodge = 0.03 + s.agi / 20 / 100 + (r.mods.dodge ?? 0) + (m.dodge ?? 0)
-  const primary = c.style === 'caster' || c.id === 'priest' ? s.int + s.spi * 0.3 : c.id === 'shaman' || c.id === 'paladin' ? s.int * 0.5 + s.str * 0.5 : s.agi
-  const spellMult = 1 + (primary + s.int * (tf.intSp ?? 0)) / 260
-  const haste = 1 + (m.haste ?? 0) + ((h.buffs.berserking ?? 0) > 0 ? 0.15 : 0)
+  // Czary jak w Classicu: Intellect daje manę i krytyki czarów, a nie moc. Obrażenia rosną z rangą
+  // (poziomem) i z mocą czarów z przedmiotów ("+X do obrażeń i leczenia czarami").
+  const spellMult = spellRank(L)
+  const sp = Math.round(gearSp + (flat as Record<string, number>).sp + s.int * (tf.intSp ?? 0) + s.spi * (tf.spiSp ?? 0))
+  const haste = 1 + (m.haste ?? 0) + ((h.buffs.berserking ?? 0) > 0 ? h.stacks?.berserk ?? 0.15 : 0)
   const stoneform = (h.buffs.stoneform ?? 0) > 0 ? 0.2 : 0
-  const extraDr = Math.min(0.5, (m.dr ?? 0) + stoneform)
+  const extraDr = Math.min(0.5, (m.dr ?? 0) + stoneform + (r.mods.resist ?? 0))
+  m.pushback = (m.pushback ?? 0) + (r.mods.pushback ?? 0)
   const dr = (mobLvl: number) => Math.min(0.8, armor / (armor + 400 + 85 * mobLvl) + extraDr)
-  return { ...s, maxHp, maxRes, res, ap: Math.max(0, Math.round(ap)), armor, crit, spellCrit, dodge, weaponDps, weaponSpeed, spellMult, haste, m, dr }
+  // łowca w zwarciu: broń z ręki głównej i siła ataku wręcz (Strength + Agility)
+  let melee = { dps: weaponDps, speed: weaponSpeed, ap: Math.max(0, Math.round(ap)) }
+  if (c.id === 'hunter') {
+    const mh = h.equip.mainhand
+    const ok = mh?.dps && mh.dur !== 0
+    melee = { dps: ok ? mh!.dps! : 1 + 0.35 * L, speed: ok ? mh!.speed ?? 2.4 : 2.4, ap: Math.max(0, Math.round((s.str + s.agi + L * 2 - 20 + flat.ap) * (1 + (tf.ap ?? 0)))) }
+  }
+  return { ...s, melee, maxHp, maxRes, res, ap: Math.max(0, Math.round(ap)), armor, crit, spellCrit, dodge, weaponDps, weaponSpeed, spellMult, sp, haste, m, dr }
 }
 
 // Mnożnik obrażeń/leczenia umiejętności z talentów i buffów
@@ -185,6 +208,27 @@ export function dmgMult(d: Derived, a: { id?: string; school?: School; aoe?: boo
   if (a?.aoe) x += m.aoe ?? 0
   return x
 }
+
+// Siła rang: w Classicu kolejne rangi czarów zadają wielokrotnie więcej (Frostbolt r1 ~20, r11 ~530),
+// tu to krzywa poziomu rangi; moc czarów z przedmiotów dodaje się według współczynnika czaru.
+export const spellRank = (L: number) => 1 + L / 45
+
+// Współczynnik mocy czarów (Classic): czas rzucania / 3,5 s (natychmiastowe jak 1,5 s), DoT/HoT: czas / 15 s,
+// obszarowe ok. 1/3, procki i totemy małe.
+export function spCoef(a: { kind?: string; cast?: number; dur?: number; aoe?: boolean; channel?: boolean } | null, part: 'direct' | 'dot' = 'direct') {
+  if (!a) return 0
+  let k: number
+  if (part === 'dot' || a.kind === 'dot' || a.kind === 'hot') k = Math.min(1, (a.dur ?? 12) / 15)
+  else if (a.kind === 'proc') k = 0.1
+  else if (a.kind === 'totem') k = 0.08
+  else if (a.kind === 'shield') k = 0.1
+  else if (a.kind === 'strike') k = 0.43
+  else k = Math.min(3.5, Math.max(1.5, a.cast ?? 0)) / 3.5
+  if (a.aoe) k /= 3
+  return k
+}
+// Obrażenia / leczenie czaru: siła rangi + moc czarów × współczynnik
+export const spellValue = (d: { spellMult: number; sp: number }, bp: number, power: number, coef: number) => bp * power * d.spellMult + d.sp * coef
 
 export const rageConv = (l: number) => 0.0091107836 * l * l + 3.225598133 * l + 4.2652911
 
