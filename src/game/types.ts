@@ -80,7 +80,15 @@ export type MobState = {
   ccl?: string // wygląd obezwładnienia jednego z grupy: poly, ice, blind
   rootl?: string // wygląd unieruchomienia: root, ice
   by?: Record<string, string> // która umiejętność nałożyła dany efekt (stun/root/fear/slow/cc)
+  ranged?: boolean // wróg dystansowy (łucznik, mag, szaman): atakuje z daleka, nie podchodzi do zwarcia
+  heroRun?: number // ile „sekund dystansu” przebiegła postać walcząca wręcz (scena: spotkanie w środku)
+  petIn?: number // ile jeszcze pupil biegnie do wroga
+  petOn?: boolean // pupil (tank) trzyma wroga: wróg bije pupila i nie idzie do postaci
 }
+
+// Ustawienia leczenia (procent zdrowia)
+export type HealCfg = { combat: number; after: number; rest: number; prefer: 'heal' | 'eat' }
+export const HEAL_DEFAULT: HealCfg = { combat: 50, after: 80, rest: 55, prefer: 'heal' }
 
 export type TotemState = { id: string; el: string; left: number; tickIn: number }
 
@@ -116,6 +124,9 @@ export type Hero = {
   wellFed: { name: string; fx: Record<string, number>; left: number } | null // buff z jedzenia
   stacks: Record<string, number> // ładunki: Maelstrom, Arcane Blast
   heroDodged: boolean
+  petHp?: number // zdrowie pupila (łowca, czarnoksiężnik)
+  petCd?: number // pupil padł: sekundy do powrotu
+  heal?: HealCfg // kiedy leczyć się czarem w walce i po walce, a kiedy jeść / odpoczywać
   mode?: 'mixed' | 'melee' | 'caster' // styl walki hybryd: czary z dystansu i wręcz / tylko wręcz / czary także w zwarciu
   cds: Record<string, number>
   buffs: Record<string, number>
@@ -144,12 +155,13 @@ export type Quest = {
   xp: number
   copper: number
   reward?: Item
+  cap?: string // zadanie ze stolicy: oddawane w stolicy frakcji, a nie w mieście mapy
 }
 
 export type ZoneProgress = { cleared: number; kills: number; bossAt?: number; bossFails?: number }
 
 export type GameEvent =
-  | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'parry' | 'absorb'; glance?: boolean; tick?: boolean }
+  | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'parry' | 'absorb'; glance?: boolean; tick?: boolean; target?: 'pet' }
   | { t: 'heal'; amt: number; ability?: string }
   | { t: 'cast'; ability: string; school?: School; kind: string }
   | { t: 'xp'; amt: number; rested: number }
@@ -160,6 +172,9 @@ export type GameEvent =
   | { t: 'gold'; amt: number }
   | { t: 'level'; level: number; learnable: number }
   | { t: 'death'; boss?: string; reset: boolean }
+  | { t: 'petdeath'; name: string }
+  | { t: 'turnback' }
+  | { t: 'petback'; name: string }
   | { t: 'revive' }
   | { t: 'zone'; zone: string }
   | { t: 'sub'; zone: string; sub: number }
@@ -176,7 +191,7 @@ export type LogLine = { time: number; text: string; color?: string }
 
 export type Totals = { kills: number; deaths: number; copper: number; xp: number; items: number; quests: number; played: number; bosses: number }
 
-export type Trip = { kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number }; path?: { zone: string; at: number }[] }
+export type Trip = { kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number }; path?: { zone: string; at: number }[]; origin?: { zone: string; sub: number }; back?: boolean }
 
 export type GameState = {
   v: 4

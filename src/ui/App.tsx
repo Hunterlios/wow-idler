@@ -14,7 +14,7 @@ import { dropItem, setEquipHook } from './itemActions'
 import { BagsPanel, CharacterPanel, CityPanel, LogPanel, QuestLog, Settings, SkillsPanel, Spellbook, TalentsPanel, fmtTime } from './Panels'
 import { onLayout, uiScale } from './layout'
 import { MapPanel } from './MapPanel'
-import { Money } from './common'
+import { Money, Guard } from './common'
 import { isOverlay, refreshCursor } from '../platform'
 import { borderUrl } from '../render/icons'
 import { cursorUrl } from '../render/assets'
@@ -175,21 +175,21 @@ export function App() {
     <div className={`root ${isOverlay ? 'overlay' : 'web'}`}>
       {!isOverlay && <WebBackdrop />}
       <div className="dock-left">
-        {game.where !== 'field' && <CityPanel s={game} onLeave={() => act('leave')} {...ax} />}
-        {open.has('char') && <CharacterPanel s={game} onClose={() => close('char')} {...ax} />}
-        {open.has('quests') && <QuestLog s={game} onClose={() => close('quests')} {...ax} />}
-        {open.has('spells') && <Spellbook s={game} onClose={() => close('spells')} bump={bump} />}
-        {open.has('talents') && <TalentsPanel s={game} onClose={() => close('talents')} {...ax} />}
-        {open.has('skills') && <SkillsPanel s={game} onClose={() => close('skills')} />}
-        {open.has('log') && <LogPanel s={game} onClose={() => close('log')} />}
+        {game.where !== 'field' && <Guard name="Town" onClose={() => act('leave')}><CityPanel s={game} onLeave={() => act('leave')} {...ax} /></Guard>}
+        {open.has('char') && <Guard name="Character" onClose={() => close('char')}><CharacterPanel s={game} onClose={() => close('char')} {...ax} /></Guard>}
+        {open.has('quests') && <Guard name="Quest Log" onClose={() => close('quests')}><QuestLog s={game} onClose={() => close('quests')} {...ax} /></Guard>}
+        {open.has('spells') && <Guard name="Spellbook" onClose={() => close('spells')}><Spellbook s={game} onClose={() => close('spells')} bump={bump} /></Guard>}
+        {open.has('talents') && <Guard name="Talents" onClose={() => close('talents')}><TalentsPanel s={game} onClose={() => close('talents')} {...ax} /></Guard>}
+        {open.has('skills') && <Guard name="Skills" onClose={() => close('skills')}><SkillsPanel s={game} onClose={() => close('skills')} /></Guard>}
+        {open.has('log') && <Guard name="Chronicle" onClose={() => close('log')}><LogPanel s={game} onClose={() => close('log')} /></Guard>}
         {open.has('settings') && (
           <Settings s={game} onClose={() => close('settings')} bump={bump}
             onReset={() => { wipeSave(); setOpen(new Set()); setGame(null) }}
             onImport={(g) => { saveGame(g); setGame(g) }} />
         )}
       </div>
-      {open.has('map') && <div className="dock-center"><MapPanel s={game} onClose={() => close('map')} bump={bump} /></div>}
-      {open.has('bags') && <div className="dock-right"><BagsPanel s={game} onClose={() => close('bags')} {...ax} /></div>}
+      {open.has('map') && <div className="dock-center"><Guard name="World Map" onClose={() => close('map')}><MapPanel s={game} onClose={() => close('map')} bump={bump} /></Guard></div>}
+      {open.has('bags') && <div className="dock-right"><Guard name="Bags" onClose={() => close('bags')}><BagsPanel s={game} onClose={() => close('bags')} {...ax} /></Guard></div>}
       {offline && <OfflineModal sum={offline} s={game} onClose={() => setOffline(null)} />}
       <div className="toasts">{toasts.map((t) => <div key={t.id} className="toast" style={{ color: t.color }}>{t.text}</div>)}</div>
       <Strip s={game} sceneRef={sceneRef} open={open} toggle={toggle} act={act} />
@@ -228,7 +228,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — browser version (demo 0.9.8)</b>
+        <b>Azeroth Idle — browser version (demo 0.9.9)</b>
         <span>In the desktop app the background is transparent and the bar sits above the Windows taskbar.</span>
         <span>Hotkeys: C character · B bags · L quests · P spellbook · N talents · K skills · M map · Esc closes windows</span>
       </div>

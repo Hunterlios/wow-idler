@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react'
 import { TALENTS, TALENT_COLS, talentPoints, spentIn, spentTotal, canLearnTalent, respecCost } from '../data/talents'
-import { learnTalent, autoTalents, resetTalents } from '../game/talents'
-import { grants, knows, formOk, chosenIn } from '../game/formulas'
+import { learnTalent, resetTalents } from '../game/talents'
+import { grants, knows, formOk, chosenIn, MAX_LEVEL } from '../game/formulas'
 import { layout, saveLayout, startDrag, uiScale } from './layout'
 import { classById, ranksOf, trainCost, isMelee, WEAPON_SKILL_PL, type Ability } from '../data/classes'
 import { raceById, RACIAL_ACTIVE } from '../data/races'
 import { skillRows, attackTable } from '../game/wskill'
 import { zoneById } from '../data/zones'
-import { stats, costOf, cdOf, isHybrid, abilityInfo, tripPlan } from '../game/sim'
+import { stats, costOf, cdOf, isHybrid, abilityInfo, tripPlan, setLevelAdmin } from '../game/sim'
 import { exportSave, importSave } from '../game/save'
 import { isAdmin, unlockAdmin, lockAdmin } from '../game/admin'
-import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, type EquipSlot, type GameState, type Quest } from '../game/types'
-import { segmentsOf, equipFromInv, unequip, sortBags, BACKPACK, capacity, usedSlots } from '../game/inventory'
+import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, HEAL_DEFAULT, type HealCfg, type EquipSlot, type GameState, type Quest } from '../game/types'
+import { segmentsOf, equipFromInv, unequip, sortBags, BACKPACK, capacity, usedSlots, equipUpgrades } from '../game/inventory'
 import { rightClickInv, rightClickEquip, setVendorOpen, canSell } from './itemActions'
-import { boardFor, acceptQuest, abandonQuest, questReady, questXp, MAX_QUESTS } from '../game/quests'
+import { boardFor, capitalBoard, canTurnInHere, turnInPlace, acceptQuest, abandonQuest, questReady, questXp, MAX_QUESTS } from '../game/quests'
 import { trainerRows, train, trainAll, sellJunk, buyBag, turnIn, placeName, buyBack, buyFood, buyKit, restock, weaponRows, trainWeapon, travel, bindHearth, repairAll, repairAllCost, repairDiscount } from '../game/town'
 import { TravelConfirm } from './MapPanel'
 import { BAGS_FOR_SALE, FOODS, KITS, canWear, makeFood, makeKit } from '../game/items'
@@ -59,7 +59,7 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
       <div className="paperdoll">
         <div className="pd-col">{LEFT_SLOTS.map(slot)}</div>
         <div className="pd-model">
-          <Portrait race={h.race} cls={h.cls} width={170} height={230} level={h.level} />
+          <Portrait race={h.race} cls={h.cls} width={170} height={230} level={h.level} hero={h} />
           {fly && (
             <div className="flyout">
               <div className="fly-head">{SLOT_PL[fly]}: choose from your bags</div>
@@ -260,7 +260,7 @@ export function QuestLog({ s, onClose, bump, toast }: { s: GameState; onClose: (
             <p>{q.text}</p>
             <h4>Objective</h4>
             <p>{q.kind === 'collect' ? `${q.item}: ${q.have}/${q.need}` : `${q.target} slain: ${q.have}/${q.need}`}</p>
-            {questReady(q) && <p className="ql-turnin">Turn in at: <b>{townOf(zoneById(q.zone), s.hero.faction)}</b></p>}
+            {questReady(q) && <p className="ql-turnin">Turn in at: <b>{turnInPlace(s, q)}</b></p>}
             <h4>Rewards</h4>
             <p><Xp n={questXp(s, q)} /> · <Money copper={q.copper} /></p>
             {q.reward && <div className="ql-reward"><ItemSlotBox item={q.reward} hero={s.hero} /><span style={{ color: ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][q.reward.rarity] }}>{q.reward.name}</span></div>}
@@ -287,8 +287,8 @@ export function QuestLog({ s, onClose, bump, toast }: { s: GameState; onClose: (
 export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: () => void } & Act) {
   const capital = s.where === 'capital'
   type Tab = 'quests' | 'trainer' | 'vendor' | 'weapons'
-  const [tab, setTab] = useState<Tab>(capital ? 'trainer' : 'quests')
-  const tabs: [Tab, string][] = capital ? [['vendor', 'Vendor'], ['trainer', 'Trainer'], ['weapons', 'Weapon Master']] : [['quests', 'Quests'], ['vendor', 'Vendor']]
+  const [tab, setTab] = useState<Tab>('quests')
+  const tabs: [Tab, string][] = capital ? [['quests', 'Quests'], ['trainer', 'Trainer'], ['vendor', 'Vendor'], ['weapons', 'Weapon Master']] : [['quests', 'Quests'], ['vendor', 'Vendor']]
   return (
     <Frame id="city" title={placeName(s)} onClose={onLeave} className="city-frame" icon={menuIcon(capital ? 'capital' : 'town')}>
       <div className="tabs">
@@ -311,11 +311,25 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
 }
 
 function QuestBoard({ s, bump, toast }: { s: GameState } & Act) {
-  const board = boardFor(s, s.loc.zone)
-  const ready = s.quests.filter((q) => q.zone === s.loc.zone && questReady(q))
-  const other = s.quests.filter((q) => q.zone !== s.loc.zone && questReady(q))
+  const capital = s.where === 'capital'
+  const board = capital ? capitalBoard(s, capitalOf(s)) : boardFor(s, s.loc.zone)
+  const ready = s.quests.filter((q) => canTurnInHere(s, q) && questReady(q))
+  const other = s.quests.filter((q) => !canTurnInHere(s, q) && questReady(q))
+  const turnAll = () => {
+    let n = 0
+    for (const q of [...ready]) { const e = turnIn(s, q); if (e) { toast(e, '#ff4040'); break } n++ }
+    if (n) { toast(`Completed ${n} quest${n > 1 ? 's' : ''}`); uiSound('ui.questdone') }
+    bump()
+  }
+  const free = MAX_QUESTS - s.quests.length
   return (
     <div className="parchment board">
+      {(ready.length > 1 || board.length > 1) && (
+        <div className="tr-foot board-top">
+          {ready.length > 1 && <button className="wbtn" onClick={turnAll}>Complete all ({ready.length})</button>}
+          {board.length > 1 && <button className="wbtn" disabled={free <= 0} onClick={() => { for (const q of board) acceptQuest(s, q); bump() }}>Accept all ({Math.min(free, board.length)})</button>}
+        </div>
+      )}
       {ready.length > 0 && <div className="board-sec">Ready to turn in</div>}
       {ready.map((q) => (
         <div key={q.id} className="board-q ready">
@@ -325,7 +339,7 @@ function QuestBoard({ s, bump, toast }: { s: GameState } & Act) {
         </div>
       ))}
       <div className="board-sec">Available quests</div>
-      {!board.length && <div className="pdim">No new quests. Defeat the miniboss to unlock the next subzone.</div>}
+      {!board.length && <div className="pdim">{capital ? 'No bounties right now. New ones appear as you discover zones and progress through them.' : 'No new quests. Defeat the miniboss to unlock the next subzone.'}</div>}
       {board.map((q) => (
         <div key={q.id} className="board-q">
           <span className="qmark">!</span>
@@ -333,8 +347,7 @@ function QuestBoard({ s, bump, toast }: { s: GameState } & Act) {
           <button className="wbtn" disabled={s.quests.length >= MAX_QUESTS} onClick={() => { acceptQuest(s, q); bump() }}>Accept</button>
         </div>
       ))}
-      {board.length > 1 && <button className="wbtn" disabled={s.quests.length >= MAX_QUESTS} onClick={() => { for (const q of board) acceptQuest(s, q); bump() }}>Accept all</button>}
-      {other.length > 0 && <div className="pdim">Completed quests from other zones are turned in at their towns: {[...new Set(other.map((q) => townOf(zoneById(q.zone), s.hero.faction)))].join(', ')}.</div>}
+      {other.length > 0 && <div className="pdim">Other completed quests are turned in at: {[...new Set(other.map((q) => turnInPlace(s, q)))].join(', ')}.</div>}
     </div>
   )
 }
@@ -348,6 +361,10 @@ function Trainer({ s, bump, toast }: { s: GameState } & Act) {
   return (
     <div className="parchment trainer">
       <div className="tr-head"><span>{c.name} Trainer</span><span>Your money: <Money copper={h.copper} /></span></div>
+      <div className="tr-foot board-top">
+        <button className="wbtn" disabled={!avail.length} onClick={() => { const n = trainAll(s); toast(n ? `Learned ${n} ranks` : 'Not enough money', n ? '#ffd100' : '#ff4040'); if (n) uiSound('ui.learn'); bump() }}>Train all (<Money copper={total} />)</button>
+        <button className="wbtn" disabled={!spentTotal(h.talents)} onClick={() => { const e = resetTalents(s); toast(e ?? 'Talents reset', e ? '#ff4040' : '#ffd100'); bump() }}>Reset talents (<Money copper={respecCost(h.level)} />)</button>
+      </div>
       <div className="tr-list">
         {rows.map((r) => {
           const a = c.abilities.find((x) => x.id === r.id)!
@@ -361,10 +378,6 @@ function Trainer({ s, bump, toast }: { s: GameState } & Act) {
             </div>
           )
         })}
-      </div>
-      <div className="tr-foot">
-        <button className="wbtn" disabled={!spentTotal(h.talents)} onClick={() => { const e = resetTalents(s); toast(e ?? 'Talents reset', e ? '#ff4040' : '#ffd100'); bump() }}>Reset talents (<Money copper={respecCost(h.level)} />)</button>
-        <button className="wbtn" disabled={!avail.length} onClick={() => { const n = trainAll(s); toast(n ? `Learned ${n} ranks` : 'Not enough money', n ? '#ffd100' : '#ff4040'); bump() }}>Train all (<Money copper={total} />)</button>
       </div>
     </div>
   )
@@ -519,6 +532,29 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
             </div>
           </div>
         )}
+        {(() => {
+          const healer = c.abilities.some((a) => (a.kind === 'heal' || a.kind === 'hot') && !a.healPct && knows(h, a, g))
+          const hc = h.heal ?? HEAL_DEFAULT
+          const set = (p: Partial<HealCfg>) => { h.heal = { ...hc, ...p }; bump() }
+          const pick = (key: 'combat' | 'after' | 'rest', opts: number[]) => (
+            <select className="hsel" value={hc[key]} onChange={(e) => set({ [key]: Number(e.target.value) })}>{opts.map((o) => <option key={o} value={o}>{o}%</option>)}</select>
+          )
+          return (
+            <div className="sp-group">
+              <div className="board-sec">Healing and resting</div>
+              <div className="sp-forms col heal-cfg">
+                {healer && <label>In combat, cast healing spells below {pick('combat', [20, 30, 40, 50, 60, 70, 80])} health</label>}
+                {healer && (
+                  <>
+                    <label><input type="radio" checked={hc.prefer === 'heal'} onChange={() => set({ prefer: 'heal' })} /> After a fight: <b>heal with spells</b> below {pick('after', [50, 60, 70, 80, 90, 95])} health (eat and drink when out of mana)</label>
+                    <label><input type="radio" checked={hc.prefer === 'eat'} onChange={() => set({ prefer: 'eat' })} /> After a fight: <b>eat / rest</b> only, save mana for combat</label>
+                  </>
+                )}
+                <label>Eat and rest after a fight below {pick('rest', [30, 40, 50, 55, 60, 70, 80, 90])} health (and below 35% mana)</label>
+              </div>
+            </div>
+          )
+        })()}
         {(hybrid || h.cls === 'hunter') && (
           <div className="sp-group">
             <div className="board-sec">Combat style</div>
@@ -633,7 +669,6 @@ export function TalentsPanel({ s, onClose, bump, toast }: { s: GameState; onClos
                   </div>
                 ))}
               </div>
-              <button className="wbtn small" disabled={!free} onClick={() => { const n = autoTalents(s, tree); toast(`Spent ${n} points in ${name}`); bump() }}>Auto: {name}</button>
             </div>
           )
         })}
@@ -663,6 +698,7 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
   const [msg, setMsg] = useState('')
   const [auto, setAuto] = useState(() => native?.getAutostart() ?? false)
   const [pw, setPw] = useState('')
+  const [lvlIn, setLvlIn] = useState(String(s.hero.level))
   const [displays, setDisplays] = useState(() => native?.getDisplays?.() ?? [])
   // ekran zmieniony przeciągnięciem paska na inny monitor: odśwież zaznaczenie
   useEffect(() => native?.onDisplay?.(() => setDisplays(native?.getDisplays?.() ?? [])), [])
@@ -674,6 +710,15 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
             <span>Game speed (admin):</span>
             {[1, 2, 5, 20].map((n) => <button key={n} className={`wbtn ${s.speed === n ? 'on' : ''}`} onClick={() => { s.speed = n; bump() }}>×{n}</button>)}
             <button className="wbtn" onClick={() => { lockAdmin(); s.speed = 1; bump() }}>Lock</button>
+          </div>
+        ) : null}
+        {isAdmin() ? (
+          <div className="set-row">
+            <span>Level (admin):</span>
+            <input type="number" min={1} max={MAX_LEVEL} value={lvlIn} onChange={(e) => setLvlIn(e.target.value)} className="pw" style={{ width: 64 }} />
+            <button className="wbtn" onClick={() => { setLevelAdmin(s, Number(lvlIn) || s.hero.level); setMsg(`Level set to ${s.hero.level}.`); bump() }}>Set level</button>
+            <button className="wbtn small" onClick={() => { setLevelAdmin(s, s.hero.level + 1); setLvlIn(String(s.hero.level)); bump() }}>+1</button>
+            <button className="wbtn small" onClick={() => { setLevelAdmin(s, s.hero.level + 5); setLvlIn(String(s.hero.level)); bump() }}>+5</button>
           </div>
         ) : (
           <div className="set-row">
@@ -701,6 +746,7 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
         </div>
         <div className="dim small">Move the bar with the ⠿ grip on the left; move windows by their title (double-click resets the position).</div>
         <label className="set-row"><input type="checkbox" checked={s.autoAdvance} onChange={(e) => { s.autoAdvance = e.target.checked; bump() }} /> Automatically move on to the next subzone / zone after a boss</label>
+        <label className="set-row"><input type="checkbox" checked={s.autoEquip} onChange={(e) => { s.autoEquip = e.target.checked; if (s.autoEquip) { const n = equipUpgrades(s.hero); if (n) setMsg(`Equipped ${n} better item${n > 1 ? 's' : ''} from your bags.`) } bump() }} /> Automatically equip better gear for your class (loot, quest rewards)</label>
         {isOverlay && <label className="set-row"><input type="checkbox" checked={auto} onChange={(e) => { native!.setAutostart(e.target.checked); setAuto(e.target.checked) }} /> Start with Windows</label>}
         <div className="set-row col">
           <span>Save backup (text):</span>

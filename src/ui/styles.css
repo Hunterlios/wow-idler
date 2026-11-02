@@ -572,6 +572,34 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .wbtn + .wbtn { margin-left: 0; }
 :where(.parchment, .wframe) :where(div, span, p) > .wbtn + .wbtn { margin-left: 4px; }
 .vend-actions > .wbtn + .wbtn, .vend-buy > .wbtn + .wbtn, .tabs > .tab + .tab { margin-left: 0; }
-/* 0.9.8: okna w doku zachowują rozmiar (nie ściskają się), w razie braku miejsca nachodzą na siebie */
-.dock-left { max-width: none; }
-.dock-left > * { flex: none; }
+/* 0.9.9: okna w doku mają stałe miejsca (lekka kaskada) i po prostu na siebie nachodzą —
+   otwarcie kolejnego okna nie przesuwa innych ani strony */
+.dock-left { display: block; width: calc(100vw - 20px); height: 0; max-width: none; pointer-events: none; }
+.dock-left > * { position: absolute; left: 0; bottom: 0; pointer-events: auto; }
+.dock-left > .city-frame { left: 0; }
+.dock-left > .char-frame { left: 0; }
+.dock-left > .quest-frame { left: 40px; }
+.dock-left > .spell-frame { left: 80px; }
+.dock-left > .talent-frame { left: 120px; }
+.dock-left > .skills-frame { left: 160px; }
+.dock-left > .log-frame { left: 200px; }
+.dock-left > .settings-frame { left: 240px; }
+.vendor .vend-actions { margin-bottom: 12px; }
+.vendor .tabs { margin-top: 4px; padding-top: 8px; border-top: 1px solid rgba(90,62,6,.35); }
+.board-top { margin: 0 0 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(90,62,6,.35); }
+.heal-cfg label { line-height: 1.9; }
+.hsel { background: #1a140a; color: var(--gold-hi); border: 1px solid var(--gold-dk); border-radius: 3px; font: 12px var(--body, inherit); padding: 1px 2px; margin: 0 3px; }
+/* 0.9.9: ramka pupila przy portrecie */
+.pet-frame { position: absolute; right: -10px; bottom: -6px; display: flex; flex-direction: column; align-items: center; gap: 1px; z-index: 2; }
+.pet-ico { position: relative; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; border: 2px solid var(--gold); box-shadow: 0 0 0 1px #000, 0 2px 4px #000; background: #000; }
+.pet-ico img { width: 100%; height: 100%; display: block; }
+.pet-ico.dead img { filter: grayscale(1) brightness(.45); }
+.pet-cd { position: absolute; inset: 0; display: grid; place-items: center; font: bold 11px var(--title); color: #ffd100; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.pet-hp { width: 30px; height: 4px; background: #000; border: 1px solid #000; outline: 1px solid #4a3c22; }
+.pet-hp i { display: block; height: 100%; background: linear-gradient(#22d822, #086808); }
+/* 0.9.9: okno śmierci na środku sceny */
+.death-pop { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 16px 8px;
+  background: linear-gradient(rgba(20,16,10,.92), rgba(8,6,4,.92)); border: 1px solid #000; outline: 1px solid var(--gold-dk); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.8); z-index: 3; pointer-events: auto; animation: dpIn .6s ease-out 1.8s both; }
+.death-pop .dp-title { font: bold 14px var(--title); color: #ff5040; text-shadow: 0 1px 2px #000; }
+.death-pop .dp-sub { font-size: 11px; color: #c0d8ff; }
+@keyframes dpIn { from { opacity: 0; transform: translate(-50%, -40%); } to { opacity: 1; transform: translate(-50%, -50%); } }

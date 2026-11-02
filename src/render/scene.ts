@@ -28,6 +28,7 @@ type Float = { x: number; y: number; vy: number; text: string; color: string; li
 type Corpse = { name: string; type: MobType; color: string; x: number; life: number; count: number; scale: number }
 type Fx = { kind: 'levelup' | 'heal' | 'racial' | 'death' | 'nova'; life: number; text?: string; x?: number }
 
+const GHOST_AT = 1.6 // s po śmierci: przejście w ducha (w środku zaciemnienia)
 const SCHOOL_COLOR: Record<School, string> = {
   physical: '#ffffff', fire: '#ff7a1a', frost: '#7fd4ff', arcane: '#ff8af0', shadow: '#a066ff', holy: '#ffe680', nature: '#7dff6a',
 }
@@ -72,14 +73,24 @@ export class Scene {
     this.canvas.style.height = `${h}px`
   }
 
-  get heroX() { return Math.max(60, Math.min(this.w * 0.32, 260)) }
+  heroAt: number | null = null // stałe miejsce postaci (portret w oknie postaci)
+  get heroBaseX() { return this.heroAt ?? Math.max(60, Math.min(this.w * 0.32, 260)) }
+  // postać walcząca wręcz wybiega naprzeciw wroga (heroOff), po walce wraca na swoje miejsce
+  heroOff = 0
+  heroOffWant = 0
+  petX: number | null = null
+  packSlide = 0 // grupa podchodzi po śmierci pierwszego
+  petCorpse: { x: number; life: number; kind: 'beast' | 'voidwalker' } | null = null
+  petPos = 0
+  petHurtT = 0
+  get heroX() { return this.heroBaseX + this.heroOff }
   get groundY() { return this.h - 14 }
   zoom = 0
   get px() { return this.zoom || Math.max(2, Math.round(this.h / 34)) }
 
   // wróg zawsze dochodzi do zwarcia; dystansowcy strzelają, gdy jeszcze biegnie
   mobTarget(_s: GameState) {
-    return this.heroX + 44 * (this.px / 2)
+    return this.heroBaseX + 44 * (this.px / 2)
   }
   totemVis: { id: string; el: string; x: number; life: number; gone: boolean }[] = []
 
@@ -93,10 +104,27 @@ export class Scene {
     const mobC = { x: mx - 2 * sc, y: gy - 11 * sc }
     switch (e.t) {
       case 'dmg':
-        if (e.src === 'mob') {
+        if (e.src === 'mob' && e.target === 'pet') {
           this.mobAtkT = 0.42
-          if (e.miss) add(hx, e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : e.miss === 'absorb' ? 'Absorb' : 'Miss', '#ffffff', 10)
-          else { add(hx, `-${e.amt}${e.crit ? '!' : ''}`, '#ff4040', e.crit ? 15 : 12); this.hurtT = 0.24; this.vfx.hit({ kind: 'claw', school: 'physical', x: hx + 5 * sc, y: gy - 14 * sc, gy, life: 0.3, crit: !!e.crit }) }
+          const px2 = this.petPos || hx
+          if (e.miss) add(px2, 'Miss', '#ffffff', 10)
+          else { add(px2, `-${e.amt}${e.crit ? '!' : ''}`, '#ff9a60', e.crit ? 14 : 11); this.petHurtT = 0.2; this.vfx.hit({ kind: 'claw', school: 'physical', x: px2 + 4 * sc, y: gy - 8 * sc, gy, life: 0.3, crit: !!e.crit }) }
+        } else if (e.src === 'mob') {
+          this.mobAtkT = 0.42
+          // wróg dystansowy strzela / rzuca czar z daleka
+          let dl = 0
+          const sm = s.mob
+          if (sm?.ranged && sm.dist > 0) {
+            const caster = /mage|shaman|priest|warlock|necro|witch|seer|oracle|mystic|geomancer|conjur|cultist|channel|acolyte|apprentice|sorcer|hex|spellbinder|enchant|wizard|summon|invoker|earthcaller|adept|felsworn|shadow hunter/i.test(sm.name)
+            const sch = /shadow|cult|necro|warlock|felsworn|witch|hex/i.test(sm.name) ? 'shadow' : /shaman|earthcaller|geomancer|seer|oracle/i.test(sm.name) ? 'nature' : /frost/i.test(sm.name) ? 'frost' : 'fire'
+            const kind = caster ? 'orb' : /thrower|headhunter/i.test(sm.name) ? 'thrown' : 'arrow'
+            dl = this.shoot(kind, caster ? sch : 'physical', { x: mx - 6 * sc, y: gy - 13 * sc }, { x: hx + 2 * sc, y: gy - 12 * sc }, !!e.crit, !e.miss)
+          }
+          if (e.miss) { add(hx, e.miss === 'dodge' ? 'Dodge' : e.miss === 'parry' ? 'Parry' : e.miss === 'absorb' ? 'Absorb' : 'Miss', '#ffffff', 10, dl); break }
+          add(hx, `-${e.amt}${e.crit ? '!' : ''}`, '#ff4040', e.crit ? 15 : 12, dl)
+          const hitHero = () => { this.hurtT = 0.24; this.vfx.hit({ kind: 'claw', school: 'physical', x: this.heroX + 5 * sc, y: gy - 14 * sc, gy, life: 0.3, crit: !!e.crit }) }
+          if (dl > 0) setTimeout(hitHero, dl * 1000); else hitHero()
+          break
         } else {
           const school = e.school ?? 'physical'
           const phys = school === 'physical'
@@ -155,13 +183,17 @@ export class Scene {
         break
       case 'kill': {
         const m = this.lastMobState
-        if (m) this.corpses.push({ name: m.name, type: m.type, color: m.color, x: this.mobX, life: 2.5, count: 1, scale: m.scale })
+        // padają wszyscy, którzy jeszcze stali (np. cała grupa jednym ciosem)
+        if (m) for (let i = 0; i < Math.max(1, this.lastAlive); i++) this.corpses.push({ name: m.name, type: m.type, color: m.color, x: this.mobX + this.packSlide + i * this.groupGap, life: 2.5 + i * 0.08, count: 1, scale: m.scale })
+        this.packSlide = 0
         break
       }
       case 'subkill': {
         const m = this.lastMobState
-        // padł jeden z grupy: zwłoki w miejscu ostatniego z rzędu
-        if (m) this.corpses.push({ name: m.name, type: m.type, color: m.color, x: this.mobX + (this.lastAlive - 1) * this.groupGap, life: 2.5, count: 1, scale: m.scale })
+        // pada pierwszy z przodu, reszta grupy podchodzi o jedno miejsce
+        if (m) this.corpses.push({ name: m.name, type: m.type, color: m.color, x: this.mobX + this.packSlide, life: 2.5, count: 1, scale: m.scale })
+        this.packSlide += this.groupGap
+        this.lastAlive = Math.max(1, this.lastAlive - 1)
         break
       }
       case 'xp':
@@ -181,6 +213,11 @@ export class Scene {
         break
       case 'spawn':
         this.mobX = this.w + 30
+        break
+      case 'petdeath':
+        this.petCorpse = { x: this.petPos || this.heroX - 22 * (this.px / 2), life: 2.5, kind: s.hero.cls === 'hunter' ? 'beast' : 'voidwalker' }
+        this.petX = null
+        add(this.petPos || hx, `${e.name} dies`, '#ff8060', 11)
         break
     }
   }
@@ -202,9 +239,12 @@ export class Scene {
     ctx.imageSmoothingEnabled = false
     const zone = currentZone(s)
     // postać walcząca wręcz biegnie do nadchodzącego wroga
-    const charging = s.phase === 'fight' && !!s.mob && s.mob.dist > 0 && s.mob.dist0 < 2
-    const moving = s.phase === 'walk' || s.phase === 'travel' || charging || (s.phase === 'dead' && this.deathT > 2 && s.phaseT > 0.6)
+    // bieg naprzeciw wroga: postać rusza się sama (tło stoi)
+    const charging = s.phase === 'fight' && !!s.mob && s.mob.dist > 0 && Math.abs(this.heroOffWant - this.heroOff) > 0.5
+    const moving = s.phase === 'walk' || s.phase === 'travel' || (s.phase === 'dead' && this.deathT > GHOST_AT && s.phaseT > 0.6)
     if (moving) this.scroll += dt * (s.phase === 'travel' ? 70 : 42) * (s.phase === 'dead' ? 1.5 : 1)
+    if (!(s.phase === 'fight' && s.mob)) this.heroOffWant = 0
+    { const dlt = this.heroOffWant - this.heroOff; const sp = (s.phase === 'fight' ? 700 : s.phase === 'walk' || s.phase === 'travel' || s.phase === 'town' || s.phase === 'dead' ? 160 : 0) * dt; this.heroOff += Math.abs(dlt) <= sp ? dlt : Math.sign(dlt) * sp }
 
     // tło: pikselowe niebo, wzgórza, rekwizyty biomu i ziemia (render/backdrop.ts)
     const gy = this.groundY
@@ -236,6 +276,15 @@ export class Scene {
       ctx.globalAlpha = 1
     }
     this.corpses = this.corpses.filter((c) => c.life > 0)
+    if (this.petCorpse) {
+      const pc = this.petCorpse
+      pc.life -= dt
+      if (moving) pc.x -= dt * 42
+      ctx.globalAlpha = Math.max(0, Math.min(1, pc.life))
+      this.blitS(petSprite(pc.kind, 'death', Math.min(5, Math.floor((2.5 - pc.life) / 0.12))), pc.x, gy, 1)
+      ctx.globalAlpha = 1
+      if (pc.life <= 0) this.petCorpse = null
+    }
 
     // mob: pikselowy sprite z animacją (podchodzi, stoi, atakuje, dostaje cios); grupa = kilka osobników jeden za drugim
     this.mobBox = null
@@ -246,9 +295,15 @@ export class Scene {
     if (s.mob) {
       const target = this.mobTarget(s)
       const start = this.w + 30
-      const k = s.mob.dist0 > 0 ? Math.max(0, Math.min(1, s.mob.dist / s.mob.dist0)) : 0
-      const want = target + (start - target) * k
       const m = s.mob
+      // podział drogi: część przebiegła postać (heroRun), resztę przeszedł wróg
+      const d0 = Math.max(0.01, m.dist0)
+      const G = start - target
+      const heroShare = Math.max(0, Math.min(1, (m.heroRun ?? 0) / d0))
+      const mobShare = Math.max(0, Math.min(1, (d0 - m.dist - (m.heroRun ?? 0)) / d0))
+      this.heroOffWant = heroShare * G
+      const k = 1 - mobShare
+      const want = target + G * k
       const rooted = (m.root ?? 0) > 0, feared = (m.fear ?? 0) > 0 && m.stun <= 0
       const fleeing = feared && want > this.mobX + 0.01
       const approaching = !rooted && m.stun <= 0 && !feared && (this.mobX > want + 0.5 || m.dist > 0)
@@ -264,15 +319,18 @@ export class Scene {
       else if (approaching) { anim = 'walk'; f = Math.floor(this.mobAnimT * 12) % 8 }
       const alive = Math.max(1, Math.min(s.mob.count, Math.ceil(s.mob.hp / s.mob.per - 1e-6)))
       this.lastAlive = alive
+      if (this.packSlide > 0) this.packSlide = Math.max(0, this.packSlide - dt * 60)
+      const sliding = this.packSlide > 0.5
+      const baseX = this.mobX + this.packSlide
       const main = mobSprite(s.mob.name, s.mob.type, s.mob.color, anim, f)
       const scale = main.scale * bscale
       this.lastMobState = { name: s.mob.name, type: s.mob.type, color: s.mob.color, count: s.mob.count, scale: bscale }
       // dalsi z grupy (ciemniejsi), za głównym
       for (let i = alive - 1; i >= 1; i--) {
-        const gx = this.mobX + i * this.groupGap
+        const gx = baseX + i * this.groupGap
         const held = m.cc > 0 && i === alive - 1 // ostatni z grupy obezwładniony (Polymorph, Freezing Trap, Blind)
         if (held && m.ccl === 'poly') { this.shadow(gx, gy, 5 * this.sc * scale); this.sheep(gx, gy, Math.max(1, Math.round(this.sc * this.dpr * scale)) / this.dpr); continue }
-        const mv = approaching && !held
+        const mv = (approaching || sliding) && !held
         const sp = mobSprite(s.mob.name, s.mob.type, s.mob.color, mv ? 'walk' : 'idle', held || stunned ? 0 : (f + i * 3) % (mv ? 8 : 4), 0.12 * i)
         this.shadow(gx, gy, ((sp.right - sp.left) / 2.4) * this.sc * scale)
         const rr = this.blitFlip(sp, gx, gy, scale, fleeing)
@@ -286,11 +344,11 @@ export class Scene {
         ctx.fillStyle = ag
         ctx.fillRect(this.mobX - 60 * bscale, gy - 70 * bscale, 120 * bscale, 80 * bscale)
       }
-      if (!main.air) this.shadow(this.mobX, gy, ((main.right - main.left) / 2.4) * this.sc * scale)
-      else this.shadow(this.mobX, gy, 6 * this.sc * scale)
+      if (!main.air) this.shadow(baseX, gy, ((main.right - main.left) / 2.4) * this.sc * scale)
+      else this.shadow(baseX, gy, 6 * this.sc * scale)
       ctx.save()
       if (this.mobFlash > 0) ctx.filter = 'brightness(1.8)'
-      const r = this.blitFlip(main, this.mobX, gy, scale, fleeing)
+      const r = this.blitFlip(sliding && anim === 'idle' ? mobSprite(s.mob.name, s.mob.type, s.mob.color, 'walk', Math.floor(this.mobAnimT * 12) % 8) : main, baseX, gy, scale, fleeing)
       ctx.restore()
       this.mobCC(m, r, gy, false)
       // tabliczka z imieniem i pasek HP moba (jak nameplate) nad głową
@@ -315,13 +373,24 @@ export class Scene {
     const pet = activePet(s.hero)
     if (pet && s.phase !== 'dead') {
       const q = p / 2
-      const melee = s.hero.cls === 'hunter' || pet.tank
-      const px = s.mob && melee ? this.mobX - 26 * q : this.heroX - 22 * q
+      // pupil-tank płynnie biegnie do wroga i trzyma go w miejscu; po walce wraca do postaci
+      const m = s.phase === 'fight' ? s.mob : null
+      const engage = !!m && !!pet.tank && (m.petOn || m.petIn != null || m.dist <= 0)
+      const home = this.heroX - 22 * q
+      if (this.petX == null || !isFinite(this.petX)) this.petX = home
+      const wantX = engage ? this.mobX - 24 * q : home
+      const spd = (engage ? 520 : 240) * dt
+      const dx = wantX - this.petX
+      this.petX += Math.abs(dx) <= spd ? dx : Math.sign(dx) * spd
+      const px = this.petX
+      this.petPos = px
+      const running = Math.abs(dx) > 2
       const walk = moving ? Math.sin(this.t * 10) : 0
       const kind = s.hero.cls === 'hunter' ? 'beast' : pet.tank ? 'voidwalker' : 'imp'
-      const pa: CAnim = moving ? 'walk' : this.petAtkT > 0 ? 'attack' : 'idle'
+      const pa: CAnim = moving || running ? 'walk' : this.petAtkT > 0 ? 'attack' : this.petHurtT > 0 ? 'hurt' : 'idle'
+      if (this.petHurtT > 0) this.petHurtT -= dt
       if (this.petAtkT > 0) this.petAtkT -= dt
-      const pf = pa === 'walk' ? Math.floor(this.t * 12) % 8 : pa === 'attack' ? Math.min(5, Math.floor((0.42 - this.petAtkT) / 0.07)) : Math.floor(this.t * 5) % 4
+      const pf = pa === 'walk' ? Math.floor(this.t * (running ? 16 : 12)) % 8 : pa === 'attack' ? Math.min(5, Math.floor((0.42 - this.petAtkT) / 0.07)) : pa === 'hurt' ? Math.min(3, Math.floor((0.2 - this.petHurtT) / 0.05)) : Math.floor(this.t * 5) % 4
       const sp = petSprite(kind, pa, pf)
       this.shadow(px, gy, ((sp.right - sp.left) / 2.4) * this.sc)
       if (kind === 'voidwalker') { ctx.save(); ctx.globalAlpha = 0.9 }
@@ -334,7 +403,7 @@ export class Scene {
     this.totems(s, gy, moving, dt)
 
     // bohater
-    this.hero(s, gy, moving, dt)
+    this.hero(s, gy, moving || charging, dt)
 
     // pociski, trafienia, cięcia, promienie
     this.vfx.update(dt, this.sc)
@@ -371,6 +440,14 @@ export class Scene {
 
     drawForeground(ctx, bo)
 
+    // świat duchów: chłodny odcień, a przy przejściu w ducha krótkie zaciemnienie
+    if (s.phase === 'dead') {
+      const dT = this.deathT
+      if (dT > GHOST_AT - 0.2) { ctx.fillStyle = 'rgba(70,110,160,.22)'; ctx.fillRect(0, 0, w, h) }
+      const fade = dT < GHOST_AT - 0.45 ? 0 : dT < GHOST_AT ? (dT - (GHOST_AT - 0.45)) / 0.45 : Math.max(0, 1 - (dT - GHOST_AT) / 0.55)
+      if (fade > 0) { ctx.fillStyle = `rgba(0,0,0,${fade})`; ctx.fillRect(0, 0, w, h) }
+    }
+
     // latające liczby
     for (const f of this.floats) {
       if (f.delay && f.delay > 0) { f.delay -= dt; continue }
@@ -396,7 +473,6 @@ export class Scene {
 
     // napisy stanu
     if (s.phase === 'travel') this.travelBanner(s)
-    if (s.phase === 'dead') this.text(`Your ghost is running back to the corpse... ${Math.ceil(s.phaseT)} s`, w / 2, 16, '#c0d8ff', 12, true)
   }
 
   // Podróż: skąd → dokąd, pasek postępu i odliczanie
@@ -910,17 +986,10 @@ export class Scene {
     const key = this.heroKey(s)
     let anim: Anim = 'idle', f = fr(6, 8)
     const shooting = key.weapon === 'Bow' || key.weapon === 'Gun' || key.weapon === 'Crossbow'
-    const ghost = dead && this.deathT > 2
+    // śmierć: animacja upadku, krótkie zaciemnienie, potem już tylko duch (bez ciała na scenie)
+    const ghost = dead && this.deathT > GHOST_AT
     if (dead && !ghost) { anim = 'death'; f = Math.min(7, Math.floor(this.deathT / 0.14)) }
-    else if (ghost) {
-      // zwłoki: zostają w tyle, a pod koniec biegu ducha wracają z prawej strony
-      const sp = 63
-      let cx: number | null = null
-      if (s.phaseT <= 2.5) cx = x + Math.max(0, (s.phaseT - 0.6) / 1.9) * (this.w + 40 - x)
-      else { const gx = x - (this.deathT - 2) * sp; if (gx > -40) cx = gx }
-      if (cx !== null) { c.save(); c.filter = 'grayscale(.7) brightness(.8)'; this.blitS(heroSprite(key, 'death', 7), cx, gy); c.restore() }
-      anim = moving ? 'walk' : 'idle'; f = moving ? fr(10, 8) : fr(4, 8)
-    }
+    else if (ghost) { anim = moving ? 'walk' : 'idle'; f = moving ? fr(10, 8) : fr(4, 8) }
     else if (s.phase === 'rest') { anim = 'sit'; f = fr(1.5, 2) }
     else if (moving) { anim = 'walk'; f = fr(12, 8) }
     else if (this.hurtT > 0 && this.atkT <= 0) { anim = 'hurt'; f = Math.min(3, Math.floor((0.24 - this.hurtT) / 0.06)) }
@@ -933,7 +1002,7 @@ export class Scene {
     let gyH = gy
     if (ghost) {
       // duch: półprzezroczysty, niebieskawy, lekko unosi się nad ziemią
-      const a = Math.min(1, (this.deathT - 2) / 0.6)
+      const a = Math.min(1, (this.deathT - GHOST_AT) / 0.5)
       c.globalAlpha = 0.6 * a
       c.filter = 'grayscale(1) brightness(1.5) sepia(1) hue-rotate(165deg) saturate(2.2) drop-shadow(0 0 3px #8ad8ff)'
       gyH = gy - Math.round((2 + Math.sin(this.t * 2.4) * 1.5) * p)

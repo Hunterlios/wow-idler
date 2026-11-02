@@ -4,6 +4,7 @@ import { zoneById } from '../data/zones'
 import { JUNK, makeGear } from './items'
 import { makeRng } from './rng'
 import { subMobs, subsOf, subLevels, bossLevel, progOf, townOf } from './world'
+import { ZONES } from '../data/zones'
 import { xpToNext } from './formulas'
 import { countItems } from './inventory'
 import type { GameState, Item, Quest } from './types'
@@ -72,6 +73,55 @@ export function boardFor(s: GameState, zoneId: string): Quest[] {
   }
   return out
 }
+
+// Zadania w stolicy (tablica ogłoszeń / Królewskie listy gończe): dla map w przedziale poziomu postaci,
+// które już odkryła. Liczenie postępu jak zwykle (zabici wrogowie danej nazwy), oddanie w dowolnej stolicy frakcji.
+export function capitalBoard(s: GameState, cap: string): Quest[] {
+  const h = s.hero
+  const enemy = h.faction === 'alliance' ? 'horde' : 'alliance'
+  const zones = ZONES.filter((z) => !z.parent && z.control !== enemy && s.unlocked.includes(z.id) && z.max >= h.level - 1 && z.min <= h.level + 3)
+    .sort((a, b) => Math.abs((a.min + a.max) / 2 - h.level) - Math.abs((b.min + b.max) / 2 - h.level)).slice(0, 3)
+  const taken = new Set(s.quests.map((q) => q.id))
+  const done = new Set(s.questsDone)
+  const out: Quest[] = []
+  for (const z of zones) {
+    const p = progOf(s, z.id)
+    const subs = subsOf(z.id)
+    const sub = Math.min(p.cleared, subs.length - 1)
+    const rng = makeRng(hashStr(`${h.name}|cap|${z.id}|${sub}`))
+    const { hi } = subLevels(z.id, sub)
+    const lvl = Math.max(z.min, hi)
+    const xpBase = xpToNext(Math.min(59, lvl))
+    const copper = Math.round(lvl * lvl * 2.5 + 60)
+    const [mob] = subMobs(z.id, sub)
+    const need = rng.int(12, 16)
+    const last = subs.length - 1
+    const boss = subs[last].boss
+    const bLvl = bossLevel(z.id, last)
+    const qs: Quest[] = [
+      {
+        id: `cap:${z.id}:${sub}:k`, zone: z.id, sub, kind: 'kill', target: mob[0], need, have: 0, level: lvl, cap,
+        title: `Bounty: ${mob[0]}`,
+        text: `The officers of ${cap} put a bounty on ${mob[0]} in ${z.name} (${subs[sub].name}). Slay ${need} of them and report back to any capital of your faction.`,
+        xp: Math.round(xpBase * 0.14), copper,
+      },
+      {
+        id: `cap:${z.id}:boss`, zone: z.id, sub: last, kind: 'boss', target: boss.name, need: 1, have: 0, level: bLvl, cap,
+        title: `Wanted: ${boss.name}`,
+        text: `A wanted poster in ${cap}: ${boss.name} holds ${subs[last].name} in ${z.name}. Bring proof of their death to any capital of your faction.`,
+        xp: Math.round(xpToNext(Math.min(59, bLvl)) * 0.3), copper: copper * 3,
+      },
+    ]
+    qs[1].reward = makeGear(rng, 950000 + (hashStr(qs[1].id) % 40000), h, bLvl, 3)
+    if (p.cleared > last) qs[1].have = 1 // boss już pokonany: można od razu oddać
+    for (const q of qs) if (!taken.has(q.id) && !done.has(q.id)) out.push(q)
+  }
+  return out
+}
+// Gdzie oddać zadanie
+export const turnInPlace = (s: GameState, q: Quest) => q.cap ? `any capital (${q.cap})` : townOf(zoneById(q.zone), s.hero.faction) ?? zoneById(q.zone).name
+// Czy zadanie można oddać tutaj
+export const canTurnInHere = (s: GameState, q: Quest) => q.cap ? s.where === 'capital' : s.where === 'town' && s.loc.zone === q.zone
 
 export function acceptQuest(s: GameState, q: Quest) {
   if (s.quests.length >= MAX_QUESTS || s.quests.some((x) => x.id === q.id)) return false

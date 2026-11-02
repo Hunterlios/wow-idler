@@ -3,8 +3,8 @@ import { classById, ranksOf, trainCost, WEAPON_SKILL_COST, WEAPON_SKILL_LVL, WEA
 import { zoneById } from '../data/zones'
 import { BAGS_FOR_SALE, FOODS, KITS, makeBag, makeFood, makeKit, repairCost } from './items'
 import { raceById } from '../data/races'
-import { addToInv, equipBag, freeSlots, removeItems, STACK } from './inventory'
-import { questXp, questReady, isQuestItem } from './quests'
+import { addToInv, equipBag, freeSlots, removeItems, STACK, autoEquip } from './inventory'
+import { questXp, questReady, isQuestItem, canTurnInHere, turnInPlace } from './quests'
 import { gainXp, log, moveTo, stats, spiritRes } from './sim'
 import { canTravel, capitalOf, capitalZone, capitalHere, homeOf, progOf, townOf, zoneOfCapital } from './world'
 import type { GameEvent, GameState, Quest } from './types'
@@ -202,7 +202,7 @@ export function buyBag(s: GameState, size: number): string | null {
 // ---------- zadania
 export function turnIn(s: GameState, q: Quest, emit: Emit = noop): string | null {
   if (!questReady(q)) return 'The quest is not complete.'
-  if (s.where !== 'town' || s.loc.zone !== q.zone) return `Turn it in at ${townOf(zoneById(q.zone), s.hero.faction)}.`
+  if (!canTurnInHere(s, q)) return `Turn it in at ${turnInPlace(s, q)}.`
   if (q.reward && freeSlots(s.hero) < 1) return 'Make room in your bags for the reward.'
   s.quests = s.quests.filter((x) => x.id !== q.id)
   s.questsDone.push(q.id)
@@ -212,7 +212,7 @@ export function turnIn(s: GameState, q: Quest, emit: Emit = noop): string | null
   const gold = Math.round(q.copper * (1 + (raceById(s.hero.race).mods.questGold ?? 0)))
   s.hero.copper += gold
   s.totals.copper += gold
-  if (q.reward) addToInv(s.hero, { ...q.reward, id: s.itemSeq++ })
+  if (q.reward) { const it = { ...q.reward, id: s.itemSeq++ }; if (!(s.autoEquip && autoEquip(s.hero, it))) addToInv(s.hero, it); else log(s, `Equipped: [${it.name}]`, '#1eff00') }
   log(s, `Oddano: ${q.title} (+${xp} XP)`, '#ffd100')
   gainXp(s, xp, emit)
   stats(s.hero)

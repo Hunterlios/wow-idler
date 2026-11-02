@@ -112,8 +112,8 @@ export const RACIAL_ICONS: Record<string, string[]> = {
 export const MENU_ICONS: Record<string, string[]> = {
   spell: ['inv_misc_book_09', 'inv_misc_book_11', 'inv_misc_book_07'], talent: ['ability_marksmanship', 'ability_warrior_improveddisciplines'],
   skills: ['ability_dualwield', 'trade_engineering'], quest: ['inv_misc_note_02', 'inv_letter_15'], map: ['inv_misc_map_01', 'inv_misc_spyglass_02', 'inv_misc_spyglass_03'],
-  log: ['inv_misc_book_08', 'inv_scroll_03'], gear: ['inv_misc_enggizmos_01', 'inv_gizmo_02', 'trade_engineering'],
-  town: ['inv_misc_rune_01', 'spell_holy_sealofsacrifice'], capital: ['spell_arcane_teleportstormwind', 'spell_arcane_teleportorgrimmar', 'inv_misc_rune_01'], hide: ['ability_vanish', 'ability_stealth'],
+  log: ['inv_misc_book_08', 'inv_scroll_03'],
+  town: ['inv_misc_rune_01', 'spell_holy_sealofsacrifice'], capital: ['spell_arcane_teleportstormwind', 'spell_arcane_teleportorgrimmar', 'inv_misc_rune_01'],
 }
 
 export const RACE_ICON = (race: string, female = false) => `race_${race === 'undead' ? 'scourge' : race}_${female ? 'female' : 'male'}`

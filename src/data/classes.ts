@@ -13,7 +13,7 @@ export type Element = 'earth' | 'fire' | 'water' | 'air'
 // Warunki użycia w rotacji (sprawdzane w symulacji)
 export type Cond =
   | 'hp<20' | 'hp<25' | 'hp<35' | 'hp<40' | 'hp<45' | 'hp<50' | 'hp<60' | 'hp<75' | 'hp>60'
-  | 'mob<20' | 'mob<25' | 'mob>30' | 'mob>50' | 'noDot' | 'dodged' | 'heroDodged' | 'cp>=2' | 'cp>=3' | 'cp5' | 'pack' | 'opener'
+  | 'mob<20' | 'mob<25' | 'mob>30' | 'mob>50' | 'noDot' | 'dodged' | 'heroDodged' | 'cp>=2' | 'cp>=3' | 'cp5' | 'pack' | 'opener' | 'approaching'
   | 'mana<20' | 'mana<30' | 'mana>40' | 'mana>60' | 'res>=25' | 'res>=30' | 'res>=40' | 'res>=50' | 'res>=60'
   | 'noShield' | 'noHot' | 'hot' | 'undead' | 'stunned' | 'notStunned' | 'noTemp' | 'lvl<10' | 'lvl<20' | 'dot:immolate'
   | 'fireTotem' | 'shield' | 'boss' | 'twoTotems' | 'behind'
@@ -107,8 +107,9 @@ export const WEAPON_SKILL_LVL: Record<string, number> = { Polearm: 20 }
 export const WEAPON_SKILL_COST = 1000 // 10 s, jak u Weapon Mastera
 
 const plateAt40 = (a: ArmorType, b: ArmorType) => (lvl: number) => (lvl >= 40 ? b : a)
-const A = (id: string, name: string, lvl: number, kind: Kind, o: Omit<Ability, 'id' | 'name' | 'lvl' | 'kind'>): Ability => ({ id, name, lvl, kind, ...o })
-const T = (id: string, name: string, kind: Kind, o: Omit<Ability, 'id' | 'name' | 'lvl' | 'kind'>): Ability => ({ id, name, lvl: 10, kind, talent: true, ...o })
+const capDesc = <X extends { desc?: string }>(o: X): X => (o.desc ? { ...o, desc: o.desc[0].toUpperCase() + o.desc.slice(1) } : o) // opisy zawsze od wielkiej litery
+const A = (id: string, name: string, lvl: number, kind: Kind, o: Omit<Ability, 'id' | 'name' | 'lvl' | 'kind'>): Ability => ({ id, name, lvl, kind, ...capDesc(o) })
+const T = (id: string, name: string, kind: Kind, o: Omit<Ability, 'id' | 'name' | 'lvl' | 'kind'>): Ability => ({ id, name, lvl: 10, kind, talent: true, ...capDesc(o) })
 
 export const CLASSES: ClassDef[] = [
   {
@@ -208,7 +209,7 @@ export const CLASSES: ClassDef[] = [
       A('serpent_sting', 'Serpent Sting', 4, 'dot', { cost: 15, power: 1.2, dur: 15, school: 'nature', desc: 'Poison over 15 s.' }),
       A('arcane_shot', 'Arcane Shot', 6, 'spell', { cost: 25, cd: 6, power: 1.0, school: 'arcane', desc: 'An instant magical shot.' }),
       A('hunters_mark', "Hunter's Mark", 6, 'buff', { debuff: true, buff: { ap: 20 }, desc: 'Increases ranged damage.' }),
-      A('concussive_shot', 'Concussive Shot', 8, 'stun', { cost: 20, cd: 12, dur: 2, when: ['hp<50'], desc: 'Slows the enemy.' }),
+      A('concussive_shot', 'Concussive Shot', 8, 'stun', { cost: 20, cd: 12, dur: 4, when: ['approaching'], prio: 3, desc: 'Dazes the enemy while it approaches: it moves at half speed for 4 s, so you get more shots before it reaches you.' }),
       A('aspect_hawk', 'Aspect of the Hawk', 10, 'buff', { buff: { ap: 30 }, group: 'aspect', gprio: 1, desc: 'A large ranged attack power bonus.' }),
       A('wing_clip', 'Wing Clip', 12, 'strike', { cost: 10, cd: 10, power: 0.35, stun: 1, school: 'physical', when: ['hp<60'], desc: 'Hamstrings the enemy in melee.' }),
       A('mongoose_bite', 'Mongoose Bite', 16, 'strike', { cost: 20, cd: 5, power: 1.0, school: 'physical', when: ['heroDodged'], desc: 'Counter after you dodge.' }),

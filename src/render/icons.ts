@@ -512,7 +512,7 @@ export function menuIcon(kind: MenuKind): string {
       g.fillStyle = BG.gear[1]; g.beginPath(); g.arc(32, 32, 7, 0, 7); g.fill()
       break
     }
-    case 'hide': g.fillStyle = '#d8d8d8'; g.fillRect(16, 40, 32, 6); P([[32, 36], [20, 20], [44, 20]], '#d8d8d8'); break
+    case 'hide': g.fillStyle = '#000'; g.fillRect(14, 37, 36, 10); g.fillStyle = '#e8e8e8'; g.fillRect(16, 39, 32, 6); break // minus: schowaj do zasobnika
     case 'town': case 'capital':
       P([[12, 54], [12, 30], [32, 14], [52, 30], [52, 54]], '#c8a070', '#3a2a10'); g.fillStyle = '#5a3a1a'; g.fillRect(27, 38, 10, 16)
       break

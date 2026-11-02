@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { layout, saveLayout, startDrag } from './layout'
 import { classById } from '../data/classes'
 import { formatMoney } from '../game/formulas'
-import { newGame } from '../game/sim'
+import { newGame, activePet } from '../game/sim'
 import { Scene } from '../render/scene'
 import { itemIcon } from '../render/icons'
 import { RARITY_COLOR, RARITY_PL, SLOT_PL, type Item, type Hero, type EquipSlot } from '../game/types'
@@ -168,14 +168,24 @@ export function ItemSlotBox({ item, hero, empty, onClick, onRight, hint, size = 
 }
 
 // Podgląd postaci: ta sama scena co w grze, tło strefy startowej
-export function Portrait({ race, cls, width = 220, height = 120, level }: { race: RaceId; cls: ClassId; width?: number; height?: number; level?: number }) {
+export function Portrait({ race, cls, width = 220, height = 120, level, hero }: { race: RaceId; cls: ClassId; width?: number; height?: number; level?: number; hero?: Hero }) {
   const ref = useRef<HTMLCanvasElement>(null)
+  const heroRef = useRef(hero)
+  heroRef.current = hero
   useEffect(() => {
     const scene = new Scene(ref.current!)
     scene.resize(width, height)
-    scene.zoom = Math.max(3, Math.round(height / 30))
     const s = newGame('', race, cls, 1)
     if (level) s.hero.level = level
+    // okno postaci: prawdziwa postać (aktualny ekwipunek, broń dystansowa, pupil)
+    if (heroRef.current) s.hero = heroRef.current
+    const hasPet = () => !!heroRef.current && !!activePet(heroRef.current)
+    const place = () => {
+      const pet = hasPet()
+      scene.zoom = Math.max(3, Math.round(height / (pet ? 40 : 30)))
+      scene.heroAt = Math.round(width * (pet ? 0.66 : 0.5))
+    }
+    place()
     s.phase = 'fight'
     s.log = []
     let raf = 0
@@ -183,6 +193,7 @@ export function Portrait({ race, cls, width = 220, height = 120, level }: { race
     const loop = (t: number) => {
       const dt = Math.min(0.05, (t - last) / 1000)
       last = t
+      if (heroRef.current) { s.hero = heroRef.current; place() }
       scene.draw(s, dt)
       raf = requestAnimationFrame(loop)
     }
@@ -272,3 +283,21 @@ export function Frame({ id, title, onClose, children, className, icon, style }: 
     </div>
   )
 }
+
+// Błąd w jednym oknie nie może wyłączyć całej gry (pusta, przezroczysta nakładka = „gra zniknęła”).
+// Okno z błędem pokazuje krótki komunikat i przycisk zamknięcia.
+class GuardImpl extends Component<{ name: string; onClose?: () => void; children: ReactNode }, { err: string | null }> {
+  state = { err: null as string | null }
+  static getDerivedStateFromError(e: unknown) { return { err: e instanceof Error ? e.message : String(e) } }
+  componentDidCatch(e: unknown) { console.error(`[${this.props.name}]`, e) }
+  render() {
+    if (!this.state.err) return this.props.children
+    return (
+      <div className="wframe" data-solid style={{ padding: 10, maxWidth: 360 }}>
+        <div className="wframe-head"><span className="wframe-title">{this.props.name}</span>{this.props.onClose && <button className="wclose" onClick={this.props.onClose}>✕</button>}</div>
+        <div className="wframe-body pdim">This window hit an error and was closed to keep the game running: {this.state.err}</div>
+      </div>
+    )
+  }
+}
+export const Guard = GuardImpl as unknown as (p: { name: string; onClose?: () => void; children: ReactNode }) => ReactNode

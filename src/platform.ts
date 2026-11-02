@@ -38,6 +38,16 @@ export function refreshCursor() {
 }
 
 // W trybie nakładki okno przepuszcza kliknięcia wszędzie poza elementami z [data-solid].
+// Kontenery strony nigdy się nie przewijają (np. przez fokus w oknie wychodzącym za ekran):
+// inaczej pasek wygląda na tym samym miejscu, a kliknięcia trafiają obok.
+export function lockScroll() {
+  const reset = (el: Element | null) => { if (el && (el.scrollLeft || el.scrollTop)) { el.scrollLeft = 0; el.scrollTop = 0 } }
+  document.addEventListener('scroll', (e) => {
+    const t = e.target
+    if (t === document) { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); return }
+    if (t instanceof Element && (t === document.body || t.id === 'root' || t.classList.contains('root') || t.classList.contains('dock-left') || t.classList.contains('dock-right') || t.classList.contains('dock-center'))) reset(t)
+  }, true)
+}
 export function installClickThrough() {
   if (!native) return
   const check = (x: number, y: number) => {

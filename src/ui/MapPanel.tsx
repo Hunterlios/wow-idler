@@ -5,7 +5,7 @@ import { ZONES, LINKS, zoneById, type Zone } from '../data/zones'
 import type { GameState } from '../game/types'
 import { routeZones, subsOf, progOf, subLevels, bossLevel, killsNeeded, canTravel, townOf, zonePct, portsOf, TRANSPORTS } from '../game/world'
 import { travel } from '../game/town'
-import { tripPlan, ride } from '../game/sim'
+import { tripPlan, ride, canTurnBack, tripPosition, turnBack } from '../game/sim'
 import { menuIcon } from '../render/icons'
 import { graphicUrl } from '../render/assets'
 import { Bar, Frame } from './common'
@@ -176,7 +176,17 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
         <div className="map-right parchment">
           <h3>{z.name}</h3>
           <div className="pdim">Levels {z.min}-{z.max} · {townOf(z, s.hero.faction) ? `town: ${townOf(z, s.hero.faction)}` : 'no town'}</div>
-          {traveling && <div className="trip-block">You are travelling ({s.trip?.to}). Pick a new destination once you arrive.</div>}
+          {traveling && (
+            <div className="trip-block">
+              You are travelling ({s.trip?.to}). Pick a new destination once you arrive.
+              {canTurnBack(s) && (() => { const pos = tripPosition(s)!; return (
+                <div className="tr-foot">
+                  <button className="wbtn small" onClick={() => { turnBack(s, 'origin'); bump() }}>↩ Turn back to {zoneById(pos.origin.zone).name} ({Math.max(2, Math.round(pos.el))} s)</button>
+                  <button className="wbtn small" onClick={() => { turnBack(s, 'here'); bump() }}>⏹ Stay in {zoneById(pos.cur.zone).name}</button>
+                </div>
+              ) })()}
+            </div>
+          )}
           {!traveling && sel !== s.loc.zone && (() => { const t = tripPlan(s, sel, 0); return t.blocked ? <div className="trip-block">{t.blocked}</div> : <div className="trip-info">🥾 On foot: {fmtSecs(t.total)}{t.form ? ` (${t.form})` : ''}</div> })()}
           {sel === s.loc.zone && myPorts.length > 0 && (
             <div className="ports">

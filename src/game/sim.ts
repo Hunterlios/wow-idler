@@ -8,11 +8,12 @@ import { basePower, derive, dmgMult, grants, knows, active, chosenIn, mobStats, 
 import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOODS, damageGear } from './items'
 import { attackTable, trySkillUp, skillOf } from './wskill'
 import { RACIAL_ACTIVE, type RacialId } from '../data/races'
-import { addToInv, fixInv, countItems } from './inventory'
+import { addToInv, fixInv, countItems, autoEquip, equipUpgrades } from './inventory'
 import { syncQuests } from './quests'
 import { makeRng, type Rng } from './rng'
 import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip, portsOf } from './world'
 import type { GameEvent, GameState, Hero, Item, MobState, OfflineSummary } from './types'
+import { HEAL_DEFAULT } from './types'
 import { ranksOf } from '../data/classes'
 
 export const TICK = 0.1
@@ -90,7 +91,19 @@ export function stats(h: Hero): Derived {
 }
 
 // ------------------------------------------------------------------ pupile
+// Pupil jest, ale mógł paść (czeka na wskrzeszenie / przywołanie)
 export function activePet(h: Hero): PetDef | null {
+  if ((h.petCd ?? 0) > 0) return null
+  return petDef(h)
+}
+// Ile zdrowia ma pupil: tank (bestia łowcy, Voidwalker) prawie tyle co postać, reszta połowę
+export function petMaxHp(h: Hero, d = stats(h)) {
+  const p = petDef(h)
+  if (!p) return 0
+  return Math.round(d.maxHp * (p.tank ? (h.cls === 'hunter' ? 0.9 : 1.05) : 0.5))
+}
+export const PET_CD = 60
+export function petDef(h: Hero): PetDef | null {
   const pets = classById(h.cls).pets
   if (!pets) return null
   const d = stats(h)
@@ -125,6 +138,19 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
   if (h.wellFed) { h.wellFed.left -= dt; if (h.wellFed.left <= 0) { h.wellFed = null; log(s, 'Well Fed has worn off.', '#aaaaaa') } }
   h.sinceCast += dt
   h.gcd = Math.max(0, h.gcd - dt)
+  // pupil: powrót po śmierci, regeneracja poza walką (w mieście pełne zdrowie)
+  const pd = petDef(h)
+  if (pd) {
+    const pmax = petMaxHp(h, d)
+    if ((h.petCd ?? 0) > 0) {
+      h.petCd! -= dt
+      if (h.petCd! <= 0) { h.petCd = 0; h.petHp = Math.round(pmax * 0.6); emit({ t: 'petback', name: pd.name }); log(s, h.cls === 'hunter' ? `You revive ${pd.name}.` : `You summon your ${pd.name} again.`, '#69ccf0') }
+    } else {
+      if (h.petHp == null || h.petHp > pmax) h.petHp = pmax
+      if (s.where !== 'field') h.petHp = pmax
+      else if (s.phase !== 'fight') h.petHp = Math.min(pmax, h.petHp + pmax * (s.phase === 'rest' ? 0.04 : 0.02) * dt)
+    }
+  }
 
   if (s.where !== 'field') {
     s.phase = 'town'
@@ -176,7 +202,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
         break
       }
       if (h.gcd > 0) break
-      const a = h.hp < d.maxHp * 0.9 ? pickHeal(h, d) : null
+      const a = h.hp < d.maxHp * Math.max(0.9, (h.heal ?? HEAL_DEFAULT).after / 100) ? pickHeal(h, d) : null
       if (!a) { afterFight(s, d, rng, emit); break }
       const ct = castTime(h, d, a)
       emit({ t: 'cast', ability: a.name, school: a.school, kind: a.kind })
@@ -194,7 +220,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
       h.hp = Math.min(d.maxHp, h.hp + (d.maxHp * (0.018 * race + selfHeal) + (eat ? e!.hp : 0)) * dt)
       if (d.res === 'mana') h.res = Math.min(d.maxRes, h.res + (d.maxRes * 0.02 + (eat ? e!.mana : 0)) * dt)
       if (e) e.left -= dt
-      const full = h.hp >= d.maxHp * 0.98 && (d.res !== 'mana' || h.res >= d.maxRes * 0.98)
+      const full = h.hp >= d.maxHp * 0.98 && (d.res !== 'mana' || h.res >= d.maxRes * 0.98) && (!activePet(h)?.tank || (h.petHp ?? 0) >= petMaxHp(h, d) * 0.9)
       if (full) { s.phase = 'walk'; s.phaseT = 1 + rng.next() * 2; h.eating = null }
       break
     }
@@ -413,13 +439,14 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
   const r = raceById(h.race)
   // wróg podchodzi: postać walcząca wręcz biegnie mu naprzeciw (krótko); kto ma czary/strzały z dystansu,
   // czeka i rzuca je, zanim wróg dojdzie
-  const dist = closesIn(h) ? 1.2 : 4.5
+  // postać walcząca wręcz biegnie wrogowi naprzeciw (spotkanie w połowie drogi: dystans 2.4 przy podwójnej prędkości zbliżania)
+  const dist = closesIn(h) ? 2.4 : 4.5
   if (b.frontier && b.full) {
     const look = bossLook(zoneId, sub)
     const zoneBoss = subOf(s).zoneBoss
     const ms = mobStats(b.lvl)
     const hp = Math.round(ms.hp * (zoneBoss ? 3.6 : 2.4))
-    s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini', dist, dist0: dist, cc: 0, slow: 0 }
+    s.mob = { name: look.name, type: look.type, color: look.color, lvl: b.lvl, hp, maxHp: hp, per: hp, dmg: ms.dmg * (zoneBoss ? 1.35 : 1.2), speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count: 1, boss: zoneBoss ? 'zone' : 'mini', dist, dist0: dist, cc: 0, slow: 0, ranged: RANGED_MOB.test(look.name) }
     emit({ t: 'spawn', mob: look.name, lvl: b.lvl, boss: s.mob.boss })
     log(s, `${zoneBoss ? 'BOSS' : 'Miniboss'}: ${look.name} (${b.lvl}) steps out to fight!`, '#ff8040')
   } else {
@@ -431,7 +458,7 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
     const count = h.level < 4 ? 1 : h.level < 8 ? (roll < 0.75 ? 1 : 2) : roll < 0.5 ? 1 : roll < 0.83 ? 2 : 3
     const each = count === 1 ? 1 : count === 2 ? 0.8 : 0.7 // w grupach moby są nieco słabsze
     const per = Math.round(ms.hp * (0.92 + rng.next() * 0.16) * each)
-    s.mob = { name, type, color, lvl, hp: per * count, maxHp: per * count, per, dmg: ms.dmg * each, speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count, dist, dist0: dist, cc: 0, slow: 0 }
+    s.mob = { name, type, color, lvl, hp: per * count, maxHp: per * count, per, dmg: ms.dmg * each, speed: ms.speed, swing: 1.2, dots: [], stun: 0, dodged: false, count, dist, dist0: dist, cc: 0, slow: 0, ranged: RANGED_MOB.test(name) }
     emit({ t: 'spawn', mob: name, lvl })
   }
   s.phase = 'fight'
@@ -498,6 +525,9 @@ function closesIn(h: Hero) {
 }
 
 let fightT = 0
+// wrogowie dystansowi: zatrzymują się w tej odległości (sekundy marszu) i strzelają / rzucają czary
+export const RANGED_STOP = 2
+export const RANGED_MOB = /trapper|archer|marksman|rifle|shaman|mage|caster|priest|warlock|necromancer|witch|seer|oracle|mystic|geomancer|conjur|cultist|channeler|acolyte|apprentice|sorcer|hexer|spellbinder|enchanter|wizard|summoner|invoker|shooter|thrower|headhunter|sniper|earthcaller|adept|felsworn|shadow hunter|scout/i
 let ticking = false
 const NEEDS_RANGED = /shot|sting|volley|rapid_fire/
 // Kontrola tłumu: co dokładnie robi każda umiejętność (ogłuszenie, unieruchomienie, strach, spowolnienie, obezwładnienie jednego z grupy)
@@ -558,10 +588,24 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
   if ((mob.fear ?? 0) > 0) mob.fear! -= dt
   const stunnedNow = mob.stun > 0
   if (stunnedNow) mob.stun -= dt
+  // pupil-tank (bestia łowcy, Voidwalker) biegnie do wroga i go zatrzymuje: wróg bije pupila
+  const tankPet = activePet(h)?.tank ? activePet(h) : null
+  if (!tankPet) { mob.petOn = false; mob.petIn = undefined }
+  else if (!mob.petOn) {
+    if (mob.dist <= 0) mob.petOn = true
+    else { mob.petIn = (mob.petIn ?? mob.dist) - dt * 3; if (mob.petIn <= 0) mob.petOn = true }
+  }
+  const held = !!mob.petOn
+  const heroRuns = closesIn(h) && mob.dist > 0 && !feared
+  const mobWalks = !stunnedNow && !((mob.root ?? 0) > 0) && !held && !(mob.ranged && mob.dist <= RANGED_STOP)
   if (feared) { mob.dist = Math.min(mob.dist + dt * 0.6, 6); mob.dist0 = Math.max(mob.dist0, mob.dist) } // ucieka
-  else if (mob.dist > 0 && !stunnedNow && !((mob.root ?? 0) > 0)) {
-    mob.dist = Math.max(0, mob.dist - dt * (mob.slow > 0 ? 0.5 : 1))
-    if (mob.dist <= 0) onContact(s, emit)
+  else if (mob.dist > 0) {
+    const step = (mobWalks ? (mob.slow > 0 ? 0.5 : 1) : 0) + (heroRuns ? 1 : 0)
+    if (step > 0) {
+      mob.dist = Math.max(0, mob.dist - dt * step)
+      if (heroRuns) mob.heroRun = (mob.heroRun ?? 0) + dt
+      if (mob.dist <= 0) onContact(s, emit)
+    }
   }
   if (mob.cc > 0) mob.cc -= dt
   const inMelee = mob.dist <= 0
@@ -623,7 +667,7 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
 
   // pupil
   const pet = activePet(h)
-  if (pet && s.mob) {
+  if (pet && s.mob && (!pet.tank || s.mob.petOn || s.mob.dist <= 0)) {
     h.petSwing -= dt
     if (h.petSwing <= 0) {
       h.petSwing += 2
@@ -633,8 +677,9 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
     }
   }
 
-  // ataki mobów (grupa bije razem) — dopiero gdy dojdą do postaci
-  if (!s.mob || !inMelee) { if (h.hp <= 0) onDeath(s, emit); return }
+  // ataki mobów (grupa bije razem): w zwarciu, z dystansu (wróg dystansowy) albo w pupila, który go trzyma
+  const canHit = inMelee || held || (!!mob.ranged && mob.dist <= RANGED_STOP + 0.01)
+  if (!s.mob || !canHit) { if (h.hp <= 0) onDeath(s, emit); return }
   if (stunnedNow || feared) { /* ogłuszony / w strachu: nie atakuje */ }
   else {
     mob.swing -= dt
@@ -642,8 +687,25 @@ function fight(s: GameState, d: Derived, dt: number, rng: Rng, emit: Emit) {
       mob.swing += mob.speed
       const alive = aliveOf(mob)
       const attackers = Math.max(alive > 1 && mob.cc > 0 ? alive - 1 : alive, 1)
-      if (pet?.tank && rng.chance(0.7)) {
-        // pupil przyjmuje cios
+      if (held && tankPet) {
+        // pupil przyjmuje ciosy całej grupy (pancerz pupila: -25%)
+        if (rng.chance(0.06)) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'miss', target: 'pet' })
+        else {
+          const up = Math.max(0, mob.lvl - h.level)
+          const crit = rng.chance(mobCritChance(up))
+          const dmg = mob.dmg * attackers * (attackers > 1 ? 0.75 : 1) * (1 + 0.1 * up + 0.05 * up * up) * (0.85 + rng.next() * 0.3) * 0.75 * (crit ? 2 : 1)
+          const max = petMaxHp(h, d)
+          h.petHp = Math.min(max, h.petHp ?? max) - dmg
+          emit({ t: 'dmg', src: 'mob', amt: Math.round(dmg), crit: crit || undefined, target: 'pet' })
+          if (h.petHp <= 0) {
+            h.petHp = 0
+            h.petCd = PET_CD
+            mob.petOn = false
+            mob.petIn = undefined
+            emit({ t: 'petdeath', name: tankPet.name })
+            log(s, `${tankPet.name} has died. It will be back in ${PET_CD} s.`, '#ff6060')
+          }
+        }
       } else if ((d.m.immune ?? 0) > 0) emit({ t: 'dmg', src: 'mob', amt: 0, miss: 'absorb' })
       else {
         const roll = rng.next()
@@ -873,7 +935,8 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
     case 'cp>=3': return h.cp >= 3
     case 'cp5': return h.cp >= 5
     case 'pack': return aliveOf(mob) >= 2
-    case 'opener': return fightT < mob.dist0 + 1.6
+    case 'opener': return fightT < mob.dist0 / (closesIn(h) ? 2 : 1) + 1.6
+    case 'approaching': return mob.dist > 0.6 && mob.slow <= 0
     case 'mana<20': return d.res === 'mana' && mana < 0.2
     case 'mana<30': return d.res === 'mana' && mana < 0.3
     case 'mana>40': return mana > 0.4
@@ -897,7 +960,7 @@ function cond(s: GameState, d: Derived, c: Cond, a: Ability): boolean {
     case 'shield': return h.equip.offhand?.weaponType === 'Shield'
     case 'boss': return !!mob.boss || aliveOf(mob) >= 3
     case 'twoTotems': return missingTotems(h).length >= 2
-    case 'behind': return mob.stun > 0 || fightT < mob.dist0 + 1.6
+    case 'behind': return mob.stun > 0 || fightT < mob.dist0 / (closesIn(h) ? 2 : 1) + 1.6
   }
   return true
 }
@@ -910,7 +973,7 @@ function defaults(a: Ability): Cond[] {
     case 'hot': return ['hp<75', 'noHot']
     case 'shield': return ['noShield']
     case 'dot': return ['noDot', 'mob>30']
-    case 'stun': return ['notStunned', 'hp<50']
+    case 'stun': return a.when ? ['notStunned'] : ['notStunned', 'hp<50'] // własne warunki umiejętności zastępują domyślny próg zdrowia
     case 'cooldown': return ['noTemp']
     case 'execute': return ['mob<20']
     case 'regen': return ['mana<30']
@@ -965,7 +1028,14 @@ function rotation(s: GameState, d: Derived): Ability | null {
     const special = (a.id === 'lightning_bolt' && (h.stacks.mw ?? 0) >= 5) || (a.id === 'arcane_missiles' && (h.stacks.ab ?? 0) >= 4)
     if (special) p = 5
     else {
-      const conds = [...(a.closes ? [] : defaults(a)), ...(a.when ?? [])]
+      let conds = [...(a.closes ? [] : defaults(a)), ...(a.when ?? [])]
+      // leczenie w walce: próg zdrowia z ustawień gracza zamiast domyślnego
+      if ((a.kind === 'heal' || a.kind === 'hot') && !a.healPct) {
+        const hc = h.heal ?? HEAL_DEFAULT
+        const lim = a.kind === 'heal' ? hc.combat / 100 : Math.min(0.95, hc.combat / 100 + 0.25)
+        if (h.hp / d.maxHp >= lim) continue
+        conds = conds.filter((c) => !c.startsWith('hp<'))
+      }
       if (!conds.every((c) => cond(s, d, c, a))) continue
     }
     // wybór między równorzędnymi: realne obrażenia na sekundę rzucania (z talentami skracającymi czas i wzmacniającymi czar)
@@ -1190,13 +1260,15 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
   }
 
   const d = stats(h)
-  // klasy z leczeniem najpierw leczą się czarem, a jedzą dopiero, gdy brakuje many
-  if (h.hp < d.maxHp * 0.8 && pickHeal(h, d)) { s.phase = 'heal'; return }
+  // klasy z leczeniem najpierw leczą się czarem, a jedzą dopiero, gdy brakuje many (albo wg ustawień: tylko jedzenie)
+  const hc = h.heal ?? HEAL_DEFAULT
+  if (hc.prefer === 'heal' && h.hp < d.maxHp * (hc.after / 100) && pickHeal(h, d)) { s.phase = 'heal'; return }
   afterFight(s, d, rng, emit)
 }
 function afterFight(s: GameState, d: Derived, rng: Rng, emit: Emit) {
   const h = s.hero
-  const needRest = h.hp < d.maxHp * 0.55 || (d.res === 'mana' && h.res < d.maxRes * 0.35)
+  const petLow = !!activePet(h)?.tank && (h.petHp ?? 0) < petMaxHp(h, d) * 0.45
+  const needRest = h.hp < d.maxHp * ((h.heal ?? HEAL_DEFAULT).rest / 100) || (d.res === 'mana' && h.res < d.maxRes * 0.35) || petLow
   if (needRest) {
     s.phase = 'rest'
     if (racialReady(h, 'cannibalize') && h.hp < d.maxHp * 0.5 && bestFood(h, 'food') < 0) emit({ t: 'racial', name: 'Cannibalize' })
@@ -1237,8 +1309,52 @@ export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noo
   if (isTraveling(s)) return 'You are already travelling.'
   const plan = tripPlan(s, zone, sub, auto)
   if (plan.blocked) return plan.blocked
-  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub }, path: plan.path }, plan.total)
+  const origin = { zone: s.loc.zone, sub: s.loc.sub }
+  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub }, path: plan.path, origin }, plan.total)
   log(s, `${plan.label || `Podróż: ${plan.fromName} → ${plan.toName}`} (${plan.total} s${plan.form ? `, ${plan.form}` : ''})`, '#69ccf0')
+  return null
+}
+
+// Zawrócenie z podróży pieszej: powrót tą samą drogą trwa tyle, ile już szliśmy,
+// albo zatrzymanie się na mapie, przez którą akurat idziemy.
+export function tripPosition(s: GameState) {
+  const tr = s.trip
+  if (!tr || s.phase !== 'travel') return null
+  const el = Math.max(0, tr.total - s.phaseT)
+  const o = tr.origin ?? { zone: s.loc.zone, sub: s.loc.sub }
+  const zones = [{ zone: o.zone, at: 0 }, ...(tr.path ?? []).filter((w) => w.at <= el)]
+  const cur = zones[zones.length - 1]
+  return { el, origin: o, zones, cur }
+}
+export function canTurnBack(s: GameState) {
+  const tr = s.trip
+  return !!tr && s.phase === 'travel' && tr.kind === 'walk' && !tr.back && !!tr.origin && tr.total - s.phaseT > 1
+}
+export function turnBack(s: GameState, how: 'origin' | 'here', emit: Emit = noop): string | null {
+  if (!canTurnBack(s)) return 'You can only turn back while walking (not on a ship, zeppelin or tram).'
+  const pos = tripPosition(s)!
+  const tr = s.trip!
+  if (how === 'origin') {
+    const secs = Math.max(2, Math.round(pos.el))
+    // droga powrotna: mapy w odwrotnej kolejności
+    const path: { zone: string; at: number }[] = []
+    for (let j = pos.zones.length - 2; j >= 0; j--) path.push({ zone: pos.zones[j].zone, at: Math.round(pos.el - pos.zones[j + 1].at) })
+    const name = `${zoneById(pos.origin.zone).name}: ${subsOf(pos.origin.zone)[pos.origin.sub]?.name ?? ''}`
+    startTrip(s, { kind: 'walk', label: `Returning: ${name}`, total: secs, from: tr.to, to: name, form: tr.form, dest: pos.origin, path, back: true }, secs)
+    log(s, `You turn back to ${name} (${secs} s).`, '#69ccf0')
+    emit({ t: 'turnback' })
+    return null
+  }
+  // zostań na mapie, przez którą idziesz: najbliższa odblokowana podstrefa
+  const z = pos.cur.zone
+  if (!s.unlocked.includes(z)) { s.unlocked.push(z); progOf(s, z) }
+  const p = progOf(s, z)
+  const sub = Math.min(p.cleared, subsOf(z).length - 1)
+  const secs = 5
+  const name = `${zoneById(z).name}: ${subsOf(z)[sub].name}`
+  startTrip(s, { kind: 'walk', label: `Stopping in ${name}`, total: secs, from: tr.to, to: name, form: tr.form, dest: { zone: z, sub }, path: [], back: true }, secs)
+  log(s, `You leave the road and stay in ${name}.`, '#69ccf0')
+  emit({ t: 'turnback' })
   return null
 }
 
@@ -1290,10 +1406,29 @@ export function gainXp(s: GameState, amt: number, emit: Emit) {
   if (h.level >= MAX_LEVEL) h.xp = 0
 }
 
+// Tryb testowy: ręczne ustawienie poziomu postaci (punkty talentów przeliczane od nowa przy obniżeniu)
+export function setLevelAdmin(s: GameState, lvl: number) {
+  const h = s.hero
+  const n = Math.max(1, Math.min(MAX_LEVEL, Math.round(lvl)))
+  if (n < h.level) h.talents = {}
+  h.level = n
+  h.xp = 0
+  const d = stats(h)
+  h.hp = d.maxHp
+  h.res = d.res === 'mana' ? d.maxRes : d.res === 'energy' ? 100 : 0
+  log(s, `Test mode: level set to ${n}.`, '#ffd100')
+}
+
 let lastFullWarn = 0
 function addLoot(s: GameState, it: Item, emit: Emit) {
   const h = s.hero
   s.totals.items++
+  // automatyczne zakładanie lepszego łupu (ustawienie), stary przedmiot wraca do toreb
+  if (s.autoEquip && it.slot && autoEquip(h, it)) {
+    emit({ t: 'loot', item: it, equipped: true })
+    log(s, `Equipped: [${it.name}] (better for your class)`, ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][it.rarity])
+    return
+  }
   if (addToInv(h, it)) {
     emit({ t: 'loot', item: it, equipped: false })
     if (it.rarity >= 2) log(s, `Loot: [${it.name}]`, ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][it.rarity])

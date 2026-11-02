@@ -186,6 +186,31 @@ Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classi
 - **Deeprun Tram ma własną scenę:** tunel z łukami i lampami, okna na głębię z rybami, bąbelkami i cieniem lewiatana, tory z podkładami, otwarte wagoniki z iskrami spod kół.
 - Szerokość paska nie ma wpływu na walkę. Czas podchodzenia wroga liczy się w sekundach w symulacji, a szerokość paska zmienia tylko to, jak daleko na ekranie widać wroga.
 
+### Nowe w 0.9.9
+- **Pupile** (bestia łowcy, Voidwalker):
+  - mają własne zdrowie;
+  - płynnie biegną do wroga i zatrzymują go: wrogowie biją najpierw pupila, a po jego śmierci idą do postaci;
+  - martwy pupil wraca po 60 s;
+  - przy portrecie jest ikona pupila z paskiem zdrowia i odliczaniem;
+  - po walce pupil się regeneruje, a postać odpoczywa, gdy pupil ma mało zdrowia.
+- **Wrogowie dystansowi** (łucznicy, magowie, szamani, Defias Trapper…) zatrzymują się w oddali i strzelają lub rzucają czary. Postać walcząca wręcz sama do nich biegnie.
+- **Postać walcząca wręcz wybiega naprzeciw wroga**, spotykają się w połowie drogi. Czas do zwarcia się nie zmienił.
+- **Ustawienia leczenia** (Spellbook): próg zdrowia dla czarów leczących w walce, leczenie czarem albo jedzenie po walce i próg odpoczynku.
+- **Concussive Shot** łowca rzuca na podchodzącego wroga, a umiejętności kontroli z własnymi warunkami nie czekają już na 50% zdrowia.
+- **Zadania w stolicach:** list gończy za bossem i nagroda za moby na mapach w Twoim przedziale poziomu; oddajesz je w dowolnej stolicy frakcji.
+- Przyciski **Complete all / Accept all** u tablicy zadań oraz **Train all / Reset talents** u trenera są na górze listy.
+- **Zawracanie z podróży pieszej:** powrót tą samą drogą (trwa tyle, ile dotychczasowa droga) albo zostanie na mapie, przez którą akurat idziesz.
+- **Grupy wrogów:** pierwszy pada ten z przodu, a reszta podchodzi. Przy zabiciu całej grupy jednym ciosem padają wszyscy.
+- **Śmierć:** upadek, krótkie zaciemnienie, potem duch bez ciała na scenie. Okno z przyciskiem wskrzeszenia jest na środku paska.
+- **Okno postaci** pokazuje prawdziwy ekwipunek (np. strzelbę zamiast łuku) i pupila w całości.
+- **Okna menu** mają stałe miejsca i nachodzą na siebie. Otwarcie kolejnego nie przesuwa innych ani gry, a strona nigdy się nie przewija.
+- **Pasek gry** jest zawsze przycinany do ekranu przy zmianie skali UI i szerokości paska.
+- Naprawione znikanie gry po kliknięciu Alterac Mountains na mapie: brakowało podstref tej mapy. Błąd w jednym oknie nie wyłącza już całej gry.
+- Wróciła ikona zębatki (ustawienia) i minus (schowaj do zasobnika).
+- Opisy talentów i umiejętności zawsze zaczynają się wielką literą.
+- Usunięte automatyczne rozdawanie talentów. Wróciło automatyczne zakładanie lepszego ekwipunku (ustawienie, domyślnie włączone).
+- Tryb testowy: ręczne ustawianie poziomu postaci.
+
 ## Struktura
 
 ```

@@ -4,7 +4,7 @@ import { raceById, RACIAL_ACTIVE } from '../data/races'
 import { zoneById } from '../data/zones'
 import { talentPoints, spentTotal } from '../data/talents'
 import { xpToNext, MAX_LEVEL, grants, active, knows, styleOf } from '../game/formulas'
-import { stats, activePet, bossState, costOf, cdOf, learnableCount, abilityInfo, autoAttacking, SPIRIT_DUR, heroInMelee, swingSpeed } from '../game/sim'
+import { stats, activePet, petDef, petMaxHp, canTurnBack, tripPosition, turnBack, bossState, costOf, cdOf, learnableCount, abilityInfo, autoAttacking, SPIRIT_DUR, heroInMelee, swingSpeed } from '../game/sim'
 import { subOf, subsOf, townOf, capitalOf, capitalZone, capitalHere, homeOf, zonePct, hasHearth, zoneOfCapital } from '../game/world'
 import { capacity, usedSlots } from '../game/inventory'
 import { questReady } from '../game/quests'
@@ -15,7 +15,7 @@ import { abilityIcon, itemIcon, menuIcon, racialIcon, raceIcon, classIcon } from
 import { firstIcon } from '../render/assets'
 const wellFedIcon = () => firstIcon(['spell_misc_food'])
 import { Bar, Hover, Money } from './common'
-import { layout, saveLayout, startDrag, uiScale } from './layout'
+import { layout, saveLayout, startDrag, uiScale, onLayout } from './layout'
 import { beginItemDrag } from './dnd'
 import { isOverlay, native } from '../platform'
 
@@ -64,9 +64,10 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
     }
     clamp()
     window.addEventListener('resize', clamp)
+    const offL = onLayout(() => requestAnimationFrame(clamp))
     native?.onPlace?.((pt) => { const k = uiScale(); const n = { ...posRef.current, x: Math.max(0, pt.x / k - 30), y: Math.max(0, pt.y / k - 10) }; setPos(n); saveLayout({ strip: n }); setTimeout(clamp, 300) })
     native?.onReset?.(() => { saveLayout({ strip: { x: null, y: null, w: 'full' }, frames: {} }); location.reload() })
-    return () => window.removeEventListener('resize', clamp)
+    return () => { window.removeEventListener('resize', clamp); offL() }
   }, [])
 
   // Tooltip wroga po najechaniu (jak w grze: nazwa, poziom, typ, zdrowie, buffy i debuffy)
@@ -102,6 +103,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
     : 'Looking for a target...'
   const cast = h.casting
   const pet = activePet(h)
+  const pd = petDef(h)
   const g = grants(h)
   const bar = c.abilities.filter((a) => active(h, a, g) && a.kind !== 'form' && a.kind !== 'summon' && a.kind !== 'buff' && a.kind !== 'proc')
   // pasek buffów postaci: pasywne buffy, nasycenia, pieczęcie, aury, buffy czasowe, totemy, rasowe, Well Fed
@@ -131,10 +133,16 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   const fmt = (x: number) => (x >= 10 ? Math.ceil(x).toString() : x.toFixed(1))
 
   // pozycja paska (przesuwany za uchwyt)
-  const W = pos.w === 'full' ? null : pos.w
-  const style: CSSProperties = pos.x == null && W == null ? {} : {
-    left: pos.x ?? `calc(50% - ${(W ?? 0) / 2}px)`, right: 'auto', width: W ?? '100%',
-    ...(pos.y != null ? { top: pos.y, bottom: 'auto' } : {}),
+  // zawsze na ekranie: szerokość i pozycja przycinane do okna przy każdej zmianie skali UI / szerokości paska
+  const kk = uiScale()
+  const vw = window.innerWidth / kk, vh = window.innerHeight / kk
+  const W = pos.w === 'full' ? null : Math.max(320, Math.min(pos.w, vw))
+  const stripH = (wrap.current?.closest('.strip') as HTMLElement | null)?.getBoundingClientRect().height ?? 0
+  const sx = pos.x == null ? null : W == null ? 0 : Math.min(Math.max(0, pos.x), Math.max(0, vw - W))
+  const sy = pos.y == null ? null : Math.min(Math.max(0, pos.y), Math.max(0, vh - (stripH ? stripH / kk : 120)))
+  const style: CSSProperties = sx == null && W == null && sy == null ? {} : {
+    left: sx ?? (W == null ? 0 : `calc(50% - ${W / 2}px)`), right: 'auto', width: W ?? '100%', maxWidth: '100%',
+    ...(sy != null ? { top: sy, bottom: 'auto' } : {}),
   }
   const grip = (e: RPointerEvent) => {
     const el = (e.currentTarget as HTMLElement).closest('.strip') as HTMLElement
@@ -170,6 +178,19 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
           </div>
           <div className="plevel">{h.level}</div>
           {h.rested > 1 && <div className="prested">zZ</div>}
+          {pd && (() => {
+            const cd = h.petCd ?? 0
+            const pmax = petMaxHp(h, d)
+            const hp = cd > 0 ? 0 : Math.max(0, Math.min(pmax, h.petHp ?? pmax))
+            const sa = c.abilities.find((a) => a.id === `summon_${pd.id}`) ?? c.abilities.find((a) => a.id === 'intimidation') ?? c.abilities[0]
+            const ico = (h.cls === 'hunter' ? firstIcon(['ability_hunter_pet_wolf', 'ability_hunter_beastcall', 'ability_hunter_beasttaming']) : null) ?? abilityIcon(sa, h.cls)
+            return (
+              <Hover className="pet-frame" anchor="above" tip={<Tip title={pd.name}>{cd > 0 ? <div>Dead — {h.cls === 'hunter' ? 'revived' : 'summoned again'} in {Math.ceil(cd)} s.</div> : <div>Health: {Math.ceil(hp)} / {pmax}</div>}{pd.tank && <div className="tt-dim">Runs to the enemy and holds it: enemies attack your pet first.</div>}</Tip>}>
+                <div className={`pet-ico ${cd > 0 ? 'dead' : ''}`}><img src={ico} alt="" draggable={false} />{cd > 0 && <span className="pet-cd">{Math.ceil(cd)}</span>}</div>
+                <div className="pet-hp"><i style={{ width: `${(hp / Math.max(1, pmax)) * 100}%` }} /></div>
+              </Hover>
+            )
+          })()}
         </div>
         <div className="unit-bars">
           <div className="unit-name"><span className="nm">{h.name}</span> {classIcon(h.cls) && <img className="cls-ico" src={classIcon(h.cls)!} alt="" draggable={false} />}<span style={{ color: c.color }}>{c.name}</span>
@@ -193,7 +214,17 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         </div>
       </div>
 
-      <div className="scene" ref={wrap} onMouseMove={onSceneMove} onMouseLeave={() => setMobTip(null)}><canvas ref={canvas} /></div>
+      <div className="scene" ref={wrap} onMouseMove={onSceneMove} onMouseLeave={() => setMobTip(null)}><canvas ref={canvas} />
+        {s.phase === 'dead' && (
+          <div className="death-pop">
+            <div className="dp-title">You died</div>
+            <div className="dp-sub">Your ghost runs back to your corpse: {Math.ceil(s.phaseT)} s</div>
+            <Hover anchor="above" tip={<Tip title="Spirit Healer"><div>Resurrect now instead of waiting.</div><div style={{ color: '#ff8080' }}>Equipped items lose {Math.round(SPIRIT_DUR * 100)}% durability and this subzone's progress starts over.</div><div className="tt-dim">Items at 0 durability give no bonuses. Repair them at a vendor or with a repair kit. Travelling or entering a town as a ghost also means resurrecting at the Spirit Healer.</div></Tip>}>
+              <button className="wbtn spirit" onClick={() => act('spirit')}>✚ Resurrect at the Spirit Healer</button>
+            </Hover>
+          </div>
+        )}
+      </div>
       {mobTip && s.mob && createPortal(<MobTooltip s={s} auras={sceneRef.current?.mobAuras(s) ?? []} x={mobTip.x} y={mobTip.y} />, document.body)}
 
       <div className="side">
@@ -212,11 +243,16 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         )}
         <div className="zone-pct"><Bar value={zonePct(s, s.loc.zone)} max={1} color="linear-gradient(#5aa0ff,#1a3a8a)" height={6} /><span>{Math.round(zonePct(s, s.loc.zone) * 100)}% of zone</span></div>
         <div className="town-btns">
-          {s.phase === 'dead' ? (
-            <Hover anchor="above" tip={<Tip title="Spirit Healer"><div>Resurrect now instead of waiting for your ghost to reach your corpse ({Math.ceil(s.phaseT)} s).</div><div style={{ color: '#ff8080' }}>Equipped items lose {Math.round(SPIRIT_DUR * 100)}% durability and this subzone's progress starts over.</div><div className="tt-dim">Items at 0 durability give no bonuses. Repair them at a vendor or with a repair kit. Travelling or entering a town as a ghost also means resurrecting at the Spirit Healer.</div></Tip>}>
-              <button className="wbtn spirit" onClick={() => act('spirit')}>✚ Spirit Healer</button>
-            </Hover>
-          ) : inTown ? <button className="wbtn" onClick={() => act('leave')}>Leave town</button> : (
+          {s.phase === 'dead' ? <span className="dim small">Ghost: {Math.ceil(s.phaseT)} s to your corpse</span> : canTurnBack(s) ? (() => {
+            const pos = tripPosition(s)!
+            const back = Math.max(2, Math.round(pos.el))
+            return (
+              <>
+                <Hover anchor="above" tip={<Tip title="Turn back">Walk back the same way to {zoneById(pos.origin.zone).name}. It takes as long as you have walked so far ({back} s).</Tip>}><button className="wbtn" onClick={() => turnBack(s, 'origin')}>↩ Back ({back} s)</button></Hover>
+                <Hover anchor="above" tip={<Tip title="Stay here">Leave the road and stay in {zoneById(pos.cur.zone).name}, the zone you are walking through now.</Tip>}><button className="wbtn" onClick={() => turnBack(s, 'here')}>⏹ Stay in {zoneById(pos.cur.zone).name}</button></Hover>
+              </>
+            )
+          })() : inTown ? <button className="wbtn" onClick={() => act('leave')}>Leave town</button> : (
             <>
               {town && <Hover anchor="above" tip={<Tip title={town}>{traveling ? 'You are travelling.' : 'Quests and a vendor for this zone.'}</Tip>}><button className="wbtn" disabled={traveling} onClick={() => act('town')}>⌂ {town}</button></Hover>}
               {atCapital ? (

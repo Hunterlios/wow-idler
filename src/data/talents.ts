@@ -12,7 +12,9 @@ const t = (tree: 0 | 1 | 2, tier: number, col: number, id: string, name: string,
   ({ id, name, tree, tier, col, max, fx, desc, grants })
 // talent nowy / zmieniony w WoW Forever
 const f = (tree: 0 | 1 | 2, tier: number, col: number, id: string, name: string, max: number, fx: Fx[], desc: string, grants?: string): Talent =>
-  ({ id, name, tree, tier, col, max, fx, desc, grants, forever: true })
+  ({ id, name, tree, tier, col, max, fx, desc: cap(desc), grants, forever: true })
+// opisy zawsze od wielkiej litery
+function cap(s: string) { return s ? s[0].toUpperCase() + s.slice(1) : s }
 
 export const TALENTS: Record<ClassId, Talent[]> = {
   warrior: [
