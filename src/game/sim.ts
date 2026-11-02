@@ -9,7 +9,7 @@ import { makeGear, makeJunk, makeBag, starterGear, makeQuestItem, makeFood, FOOD
 import { addToInv, fixInv, countItems } from './inventory'
 import { syncQuests } from './quests'
 import { makeRng, type Rng } from './rng'
-import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip } from './world'
+import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip, portsOf, RIDE_SECS } from './world'
 import type { GameEvent, GameState, Hero, Item, MobState, OfflineSummary } from './types'
 import { ranksOf } from '../data/classes'
 
@@ -180,7 +180,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
       h.totems = []
       regenOut(h, d, dt, 0.05)
       s.phaseT -= dt
-      if (s.phaseT <= 0) { s.phase = 'walk'; s.phaseT = 1; s.trip = null }
+      if (s.phaseT <= 0) arrive(s, emit)
       break
   }
 }
@@ -318,8 +318,9 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
   const style = styleOf(h)
   const b = bossState(s)
   const r = raceById(h.race)
-  // wróg podchodzi: walczący wręcz biegną sobie naprzeciw (krótko), dystansowcy strzelają, zanim dojdzie
-  const dist = style === 'melee' ? 1.6 : 4.5
+  // wróg podchodzi: postać walcząca wręcz biegnie mu naprzeciw (krótko); kto ma czary/strzały z dystansu,
+  // czeka i rzuca je, zanim wróg dojdzie
+  const dist = closesIn(h) ? 1.2 : 4.5
   if (b.frontier && b.full) {
     const look = bossLook(zoneId, sub)
     const zoneBoss = subOf(s).zoneBoss
@@ -350,6 +351,20 @@ function spawn(s: GameState, rng: Rng, emit: Emit) {
   if (r.active === 'bloodfury' && ready('bloodfury')) { h.buffs.bloodfury = 15; h.cds.bloodfury = 120; emit({ t: 'racial', name: 'Blood Fury' }) }
   if (r.active === 'berserking' && ready('berserking')) { h.buffs.berserking = 10; h.cds.berserking = 180; emit({ t: 'racial', name: 'Berserking' }) }
   if (r.active === 'warstomp' && ready('warstomp') && s.mob) { s.mob.stun = 2; h.cds.warstomp = 120; emit({ t: 'racial', name: 'War Stomp' }) }
+}
+
+// Hybryda = walczy wręcz, ale ma czary rzucane z dystansu (szaman, paladyn, druid w formie zwierzęcia nie)
+export function isHybrid(h: Hero) {
+  if (styleOf(h) !== 'melee') return false
+  const g = grants(h)
+  return classById(h.cls).abilities.some((a) => (a.kind === 'spell' || a.kind === 'dot' || a.kind === 'drain') && !isMelee(a) && (a.cast ?? 0) > 0 && knows(h, a, g))
+}
+// Czy postać od razu biegnie do wroga (brak aktywnych czarów z dystansu albo styl "Wręcz")
+function closesIn(h: Hero) {
+  if (styleOf(h) !== 'melee') return false
+  if (h.mode === 'melee') return true
+  const g = grants(h)
+  return !classById(h.cls).abilities.some((a) => (a.kind === 'spell' || a.kind === 'dot' || a.kind === 'drain') && !isMelee(a) && (a.power ?? 0) > 0 && active(h, a, g))
 }
 
 let fightT = 0
@@ -675,6 +690,7 @@ function rotation(s: GameState, d: Derived): Ability | null {
   const g = grants(h)
   const shadowform = (d.m['school:shadow'] ?? 0) >= 0.15 && !h.disabled.shadowform && g.has('shadowform')
   const missing = missingTotems(h, g)
+  const melee = styleOf(h) === 'melee'
   let best: Ability | null = null
   let bestP = Infinity
   let bestScore = -1
@@ -685,6 +701,8 @@ function rotation(s: GameState, d: Derived): Ability | null {
     if (mob.dist > 0 && isMelee(a) && !a.closes) continue // poza zasięgiem zwarcia
     if (a.closes && mob.dist <= 0) continue
     if (shadowform && a.school === 'holy' && a.kind !== 'heal' && a.kind !== 'shield' && a.kind !== 'hot') continue
+    // styl walki hybrydy: w zwarciu (albo zawsze w stylu "Wręcz") bez czarów rzucanych dłużej niż natychmiast
+    if (melee && (a.kind === 'spell' || a.kind === 'dot' || a.kind === 'drain') && !isMelee(a) && castTime(h, d, a) > 0 && (h.mode === 'melee' || (h.mode !== 'caster' && mob.dist <= 0))) continue
     if (a.kind === 'totem') {
       if (a.totem ? h.totems.some((t) => t.el === a.totem) : missing.length < 2) continue
     }
@@ -909,15 +927,11 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
       const r = routeZones(s)
       const next = r[r.indexOf(s.loc.zone) + 1]
       log(s, `${mob.name} pokonany! ${zoneById(s.loc.zone).name} ukończona.`, '#ff8040')
-      if (next && !s.unlocked.includes(next)) {
-        s.unlocked.push(next)
-        s.prog[next] ??= { cleared: 0, kills: 0 }
-        log(s, `Odblokowano: ${zoneById(next).name} (${zoneById(next).min}-${zoneById(next).max})`, '#69ccf0')
-      }
-      if (next && s.autoAdvance) return moveTo(s, next, 0, emit, true)
+      if (next) log(s, `Następna mapa na trasie: ${zoneById(next).name} (${zoneById(next).min}-${zoneById(next).max})`, '#69ccf0')
+      if (next && s.autoAdvance) { moveTo(s, next, 0, emit, true); return }
     } else {
       log(s, `${mob.name} pokonany! Odblokowano: ${subs[s.loc.sub + 1].name}`, '#ff8040')
-      if (s.autoAdvance) return moveTo(s, s.loc.zone, s.loc.sub + 1, emit, true)
+      if (s.autoAdvance) { moveTo(s, s.loc.zone, s.loc.sub + 1, emit, true); return }
     }
   } else if (s.loc.sub === p.cleared && p.cleared < subs.length) {
     p.kills = Math.min(killsNeeded(s.loc.zone, s.loc.sub), p.kills + mob.count)
@@ -939,31 +953,63 @@ export function travelForm(h: Hero): { name: string; speed: number } | null {
   if (!a) return null
   return { name: a.name, speed: a.travel! + (stats(h).m.travel ?? 0) }
 }
-export function tripPlan(s: GameState, zone: string, sub: number) {
+export function tripPlan(s: GameState, zone: string, sub: number, auto = false) {
   const form = travelForm(s.hero)
-  const p = planTrip(s.hero.faction, s.loc.zone, zone, form?.speed ?? 0)
+  const p = planTrip(s.hero.faction, s.loc.zone, zone, form?.speed ?? 0, auto)
   const fromName = `${zoneById(s.loc.zone).name}${s.where === 'field' ? `: ${subOf(s).name}` : ''}`
   const toName = `${zoneById(zone).name}: ${subsOf(zone)[sub].name}`
   return { ...p, form: form?.name, fromName, toName }
 }
+export const isTraveling = (s: GameState) => s.phase === 'travel' && !!s.trip
 
-// Podróż: piesza w obrębie lądu, statki / zeppeliny między kontynentami (trwa, z odliczaniem na scenie)
-export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noop, _auto = false) {
-  const changedZone = zone !== s.loc.zone
-  const plan = tripPlan(s, zone, sub)
-  s.loc = { zone, sub }
+function startTrip(s: GameState, trip: GameState['trip'], secs: number) {
   s.where = 'field'
   s.mob = null
   s.hero.casting = null
   s.hero.totems = []
   s.phase = 'travel'
-  s.phaseT = plan.total
-  s.trip = { kind: plan.kind, label: plan.label || `${changedZone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form }
-  if (!s.unlocked.includes(zone)) s.unlocked.push(zone)
-  progOf(s, zone)
-  if (changedZone) emit({ t: 'zone', zone })
-  emit({ t: 'sub', zone, sub })
+  s.phaseT = secs
+  s.trip = trip
+}
+
+// Podróż: postać jest w drodze, a cel (i odkrycie mapy) liczy się dopiero po dotarciu
+export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noop, auto = false): string | null {
+  if (isTraveling(s)) return 'Jesteś już w podróży.'
+  const plan = tripPlan(s, zone, sub, auto)
+  if (plan.blocked) return plan.blocked
+  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub } }, plan.total)
   log(s, `${plan.label || `Podróż: ${plan.fromName} → ${plan.toName}`} (${plan.total} s${plan.form ? `, ${plan.form}` : ''})`, '#69ccf0')
+  return null
+}
+
+// Statek / zeppelin z portu na obecnej mapie
+export function ride(s: GameState, index: number, emit: Emit = noop): string | null {
+  if (isTraveling(s)) return 'Jesteś już w podróży.'
+  const port = portsOf(s.hero.faction, s.loc.zone).find((p) => p.i === index)
+  if (!port) return 'Z tej mapy nie odpływa ten transport.'
+  const toName = `${zoneById(port.to).name}: ${subsOf(port.to)[0].name}`
+  const secs = RIDE_SECS + 10
+  startTrip(s, { kind: port.t.kind, label: port.t.label, total: secs, from: zoneById(s.loc.zone).name, to: toName, dest: { zone: port.to, sub: 0 } }, secs)
+  log(s, `${port.t.label} (${secs} s)`, '#69ccf0')
+  void emit
+  return null
+}
+
+function arrive(s: GameState, emit: Emit) {
+  const dest = s.trip?.dest
+  s.phase = 'walk'
+  s.phaseT = 1
+  s.trip = null
+  if (!dest) return
+  const changed = dest.zone !== s.loc.zone
+  s.loc = { zone: dest.zone, sub: dest.sub }
+  if (!s.unlocked.includes(dest.zone)) {
+    s.unlocked.push(dest.zone)
+    log(s, `Odkryto: ${zoneById(dest.zone).name} (${zoneById(dest.zone).min}-${zoneById(dest.zone).max})`, '#69ccf0')
+  }
+  progOf(s, dest.zone)
+  if (changed) emit({ t: 'zone', zone: dest.zone })
+  emit({ t: 'sub', zone: dest.zone, sub: dest.sub })
 }
 
 export function gainXp(s: GameState, amt: number, emit: Emit) {

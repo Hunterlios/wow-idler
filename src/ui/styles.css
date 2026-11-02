@@ -467,3 +467,17 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .unit-bars .swingbar { margin-top: 0; height: 3px !important; }
 .unit-bars .swingbar .bar-gloss { display: none; }
 .unit { padding: 5px 10px; }
+
+/* ---- v0.6 ---- */
+.unit-name { display: flex; align-items: center; gap: 4px; overflow: visible; }
+.buffbar { display: inline-flex; gap: 2px; margin-left: auto; flex-wrap: nowrap; overflow: hidden; max-width: 60%; }
+.buff { position: relative; width: 16px; height: 16px; flex: none; }
+.buff img { width: 16px; height: 16px; border-radius: 2px; box-shadow: 0 0 0 1px #000; display: block; }
+.buff-t { position: absolute; bottom: -3px; left: 0; right: 0; text-align: center; font: bold 7px var(--body); color: #ffd100; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.wbtn.cooling { opacity: .6; }
+.sp-forms.col { flex-direction: column; gap: 3px; align-items: flex-start; }
+.map-port { cursor: pointer; }
+.ports { margin: 6px 0; padding: 6px; border: 1px solid rgba(60,40,10,.35); border-radius: 4px; background: rgba(255,255,255,.2); }
+.ports .port-row { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 3px 0; }
+.trip-block { color: #8a1010; font-size: 12px; font-weight: bold; margin: 4px 0; }
+.map-port { font-size: 15px; pointer-events: none; }

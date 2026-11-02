@@ -106,6 +106,7 @@ export type Hero = {
   wellFed: { name: string; fx: Record<string, number>; left: number } | null // buff z jedzenia
   stacks: Record<string, number> // ładunki: Maelstrom, Arcane Blast
   heroDodged: boolean
+  mode?: 'mixed' | 'melee' | 'caster' // styl walki hybryd: czary z dystansu i wręcz / tylko wręcz / czary także w zwarciu
   cds: Record<string, number>
   buffs: Record<string, number>
   casting: { id: string; left: number; total: number; mult?: number; pb?: number } | null
@@ -164,7 +165,7 @@ export type LogLine = { time: number; text: string; color?: string }
 
 export type Totals = { kills: number; deaths: number; copper: number; xp: number; items: number; quests: number; played: number; bosses: number }
 
-export type Trip = { kind: 'walk' | 'ship' | 'zeppelin'; label: string; total: number; from?: string; to?: string; form?: string }
+export type Trip = { kind: 'walk' | 'ship' | 'zeppelin'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number } }
 
 export type GameState = {
   v: 4

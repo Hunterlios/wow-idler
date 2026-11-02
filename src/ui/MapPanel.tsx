@@ -3,9 +3,9 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ZONES, LINKS, zoneById, type Zone } from '../data/zones'
 import type { GameState } from '../game/types'
-import { routeZones, subsOf, progOf, subLevels, bossLevel, killsNeeded, canTravel, townOf, zonePct } from '../game/world'
+import { routeZones, subsOf, progOf, subLevels, bossLevel, killsNeeded, canTravel, townOf, zonePct, portsOf, TRANSPORTS, RIDE_SECS } from '../game/world'
 import { travel } from '../game/town'
-import { tripPlan } from '../game/sim'
+import { tripPlan, ride } from '../game/sim'
 import { menuIcon } from '../render/icons'
 import { Bar, Frame } from './common'
 
@@ -18,6 +18,10 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
   const [sel, setSel] = useState(s.loc.zone)
   const [hover, setHover] = useState<Zone | null>(null)
   const [ask, setAsk] = useState<{ zone: string; sub: number } | null>(null)
+  const [askRide, setAskRide] = useState<number | null>(null)
+  const traveling = s.phase === 'travel'
+  const myPorts = portsOf(s.hero.faction, s.loc.zone)
+  const lines = TRANSPORTS.filter((t) => t.faction === 'neutral' || t.faction === s.hero.faction)
   const route = routeZones(s)
   const unlocked = new Set(s.unlocked)
   const onRoute = route.filter((id) => unlocked.has(id))
@@ -46,6 +50,13 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
             {LINKS.map(([a, b]) => { const pa = pos(zoneById(a)), q = pos(zoneById(b)); return <line key={a + b} x1={pa.x} y1={pa.y} x2={q.x} y2={q.y} stroke="#3a2a14" strokeWidth="1.5" opacity="0.45" /> })}
             <polyline points={pts.map((pt) => `${pt.x},${pt.y}`).join(' ')} fill="none" stroke="#ffd100" strokeWidth="3" opacity="0.9" />
             {next && (() => { const a = pos(zoneById(onRoute[onRoute.length - 1])), b = pos(zoneById(next)); return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffd100" strokeWidth="2" strokeDasharray="6 5" opacity="0.8" /> })()}
+            {lines.map((t) => { const a = pos(zoneById(t.a)), b = pos(zoneById(t.b)); const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 30; return (
+              <g key={t.label}>
+                <path d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`} fill="none" stroke={t.kind === 'ship' ? '#9ad8ff' : '#ffb060'} strokeWidth="2" strokeDasharray="5 4" opacity="0.85" />
+                <text x={a.x + 12} y={a.y - 14} className="map-port">{t.kind === 'ship' ? '⚓' : '🎈'}</text>
+                <text x={b.x + 12} y={b.y - 14} className="map-port">{t.kind === 'ship' ? '⚓' : '🎈'}</text>
+              </g>
+            ) })}
             {ZONES.map((zz) => {
               const pt = pos(zz)
               const isStart = !!zz.parent
@@ -75,7 +86,20 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
         <div className="map-right parchment">
           <h3>{z.name}</h3>
           <div className="pdim">Poziomy {z.min}-{z.max} · {townOf(z, s.hero.faction) ? `miasto: ${townOf(z, s.hero.faction)}` : 'brak miasta'}</div>
-          {sel !== s.loc.zone && (() => { const t = tripPlan(s, sel, 0); return <div className="trip-info">{t.kind === 'ship' ? '⛵' : t.kind === 'zeppelin' ? '🎈' : '🥾'} Podróż: {fmtSecs(t.total)}{t.label ? ` · ${t.label}` : ''}</div> })()}
+          {traveling && <div className="trip-block">Jesteś w podróży ({s.trip?.to}). Nowy cel wybierzesz po dotarciu.</div>}
+          {!traveling && sel !== s.loc.zone && (() => { const t = tripPlan(s, sel, 0); return t.blocked ? <div className="trip-block">{t.blocked}</div> : <div className="trip-info">🥾 Pieszo: {fmtSecs(t.total)}{t.form ? ` (${t.form})` : ''}</div> })()}
+          {sel === s.loc.zone && myPorts.length > 0 && (
+            <div className="ports">
+              <b>Port na tej mapie</b>
+              {myPorts.map((p) => (
+                <div key={p.i} className="port-row">
+                  <span>{p.t.kind === 'ship' ? '⚓' : '🎈'} {p.t.label} → <b>{zoneById(p.to).name}</b> ({fmtSecs(RIDE_SECS + 10)})</span>
+                  <button className="wbtn small" disabled={traveling} onClick={() => setAskRide(p.i)}>Wsiądź</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {sel !== s.loc.zone && portsOf(s.hero.faction, sel).length > 0 && <div className="pdim small">Port: {portsOf(s.hero.faction, sel).map((p) => `${p.t.kind === 'ship' ? '⚓' : '🎈'} ${zoneById(p.to).name}`).join(', ')}</div>}
           <div className="zone-total"><Bar value={zonePct(s, sel)} max={1} color="linear-gradient(#5aa0ff,#1a3a8a)" height={12} label={`${Math.round(zonePct(s, sel) * 100)}%`} /></div>
           <div className="subs">
             {subs.map((sz, i) => {
@@ -91,7 +115,7 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
                     <span className="subz-n">{i + 1}.</span>
                     <b>{sz.name}</b>
                     <span className="pdim">({Math.max(z.min, lo)}-{Math.max(lo, hi)})</span>
-                    {can && !here ? <button className="wbtn small" onClick={() => setAsk({ zone: sel, sub: i })}>Idź</button> : here ? <span className="subz-here">tu jesteś</span> : null}
+                    {can && !here ? <button className="wbtn small" disabled={traveling || !!tripPlan(s, sel, i).blocked} onClick={() => setAsk({ zone: sel, sub: i })}>Idź</button> : here ? <span className="subz-here">tu jesteś</span> : null}
                   </div>
                   <div className="subz-boss">
                     {sz.zoneBoss ? '☠ Boss mapy' : 'Miniboss'}: <b>{sz.boss.name}</b> ({bossLevel(sel, i)}) {cleared ? <span className="ok">✓ pokonany</span> : frontier ? <span>· {Math.min(need, p.kills)}/{need}</span> : <span className="pdim">· zablokowane</span>}
@@ -102,6 +126,7 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
             })}
           </div>
           {ask && <TravelConfirm s={s} zone={ask.zone} sub={ask.sub} onCancel={() => setAsk(null)} onGo={() => { travel(s, ask.zone, ask.sub); setAsk(null); bump() }} />}
+          {askRide != null && <RideConfirm s={s} index={askRide} onCancel={() => setAskRide(null)} onGo={() => { ride(s, askRide); setAskRide(null); bump() }} />}
           <label className="auto-adv"><input type="checkbox" checked={s.autoAdvance} onChange={(e) => { s.autoAdvance = e.target.checked; bump() }} /> Po bossie idź automatycznie dalej</label>
         </div>
       </div>
@@ -129,6 +154,27 @@ function TravelConfirm({ s, zone, sub, onGo, onCancel }: { s: GameState; zone: s
           {lvl > s.hero.level + 3 && <div className="tc-warn">Uwaga: wrogowie od poziomu {lvl}, a ty masz {s.hero.level}. Będzie bardzo ciężko.</div>}
           <div className="pdim small">W trakcie podróży postać nie walczy. Zadania i postęp innych map zostają.</div>
           <div className="tc-btns"><button className="wbtn" onClick={onGo}>Wyrusz</button><button className="wbtn" onClick={onCancel}>Anuluj</button></div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function RideConfirm({ s, index, onGo, onCancel }: { s: GameState; index: number; onGo: () => void; onCancel: () => void }) {
+  const p = portsOf(s.hero.faction, s.loc.zone).find((x) => x.i === index)
+  if (!p) return null
+  return createPortal(
+    <div className="modal-back" data-solid onClick={onCancel}>
+      <div className="modal wframe travel-confirm" onClick={(e) => e.stopPropagation()}>
+        <div className="wframe-head"><span className="wframe-title">{p.t.kind === 'ship' ? 'Rejs statkiem' : 'Lot zeppelinem'}</span></div>
+        <div className="wframe-body parchment">
+          <div className="tc-row"><span>Skąd:</span><b>{zoneById(s.loc.zone).name}</b></div>
+          <div className="tc-row"><span>Dokąd:</span><b>{zoneById(p.to).name}: {subsOf(p.to)[0].name}</b></div>
+          <div className="tc-row"><span>Czas:</span><b>{fmtSecs(RIDE_SECS + 10)}</b></div>
+          <div className="tc-row"><span>Jak:</span><b>{p.t.label}</b></div>
+          <div className="pdim small">Po przybyciu dalej idziesz pieszo, wybierając cel na mapie.</div>
+          <div className="tc-btns"><button className="wbtn" onClick={onGo}>Wsiądź</button><button className="wbtn" onClick={onCancel}>Anuluj</button></div>
         </div>
       </div>
     </div>,

@@ -169,7 +169,9 @@ export class Scene {
     ctx.imageSmoothingEnabled = false
     const zone = currentZone(s)
     const B = BIOMES[zone.biome]
-    const moving = s.phase === 'walk' || s.phase === 'travel' || (s.phase === 'dead' && s.phaseT > 3)
+    // postać walcząca wręcz biegnie do nadchodzącego wroga
+    const charging = s.phase === 'fight' && !!s.mob && s.mob.dist > 0 && s.mob.dist0 < 2
+    const moving = s.phase === 'walk' || s.phase === 'travel' || charging || (s.phase === 'dead' && s.phaseT > 3)
     if (moving) this.scroll += dt * (s.phase === 'travel' ? 70 : 42) * (s.phase === 'dead' ? 1.5 : 1)
 
     // niebo

@@ -26,7 +26,7 @@ export function rightClickInv(s: GameState, idx: number): Res {
   const h = s.hero
   const it = h.inv[idx]
   if (!it) return null
-  if (s.where === 'capital') return sell(s, idx)
+  if (s.where !== 'field') return sell(s, idx)
   if (it.food) { const e = useItem(s, idx); stats(h); return e ? err(e) : { msg: `${it.name}: Well Fed`, color: '#40ff40' } }
   if (it.bagSize || it.slot) return err(equipFromInv(h, idx))
   return null
@@ -50,7 +50,7 @@ export function dropItem(s: GameState, src: DragSrc, target: string | null): Res
     const it = h.inv[src.idx]
     if (!it) return null
     if (kind === 'inv') { moveInv(h, src.idx, Number(arg)); return null }
-    if (kind === 'vendor') return s.where === 'capital' ? sell(s, src.idx) : err('Sprzedasz tylko u kupca w stolicy.')
+    if (kind === 'vendor') return s.where !== 'field' ? sell(s, src.idx) : err('Sprzedasz tylko u kupca w mieście.')
     if (kind === 'eq' && isSlot(arg)) {
       if (!fitsSlot(it, arg)) return err('To nie pasuje do tego miejsca.')
       if (!canWear(h, it)) return err('Nie możesz tego używać.')

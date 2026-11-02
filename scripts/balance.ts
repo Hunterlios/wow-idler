@@ -19,8 +19,9 @@ const form = process.argv[6]
 const disable = (process.argv[7] ?? '').split(',').filter(Boolean)
 
 export function visit(s: GameState) {
+  if (s.phase === 'travel') return // gracz nie wchodzi do miasta w trakcie podróży
   equipUpgrades(s.hero)
-  enterCapital(s)
+  s.where = 'capital' // test: gracz odwiedza stolicę bez liczenia drogi
   trainAll(s)
   autoTalents(s, spec)
   if (s.hero.cls === 'warlock' && s.hero.trained.summon_voidwalker) s.hero.pet = 'voidwalker'

@@ -64,6 +64,8 @@ export function townOf(z: Zone, faction: Faction): string | null {
   return parts[0]
 }
 export const capitalOf = (s: GameState) => raceById(s.hero.race).start.capital
+// mapa, na której leży stolica rasy (np. Orgrimmar -> Durotar)
+export const capitalZone = (s: GameState) => ZONES.find((z) => z.capital === capitalOf(s))!.id
 
 export const isUnlocked = (s: GameState, zoneId: string) => s.unlocked.includes(zoneId)
 // Jak w grze: na każdą mapę można pójść od razu (także wyższego poziomu). W obrębie mapy podstrefy
@@ -87,19 +89,46 @@ export const TRANSPORTS: Transport[] = [
   { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'tirisfal', label: 'Zeppelin: Orgrimmar ↔ Undercity' },
   { kind: 'zeppelin', faction: 'horde', a: 'durotar', b: 'stranglethorn', label: "Zeppelin: Orgrimmar ↔ Grom'gol" },
 ]
-const RIDE = 60 // s rejsu / lotu
-const landmass = (id: string) => { const z = zoneById(id); const p = z.parent ?? id; return p === 'teldrassil' ? 'tel' : z.continent }
+const RIDE = 60 // s rejsu / lotu (RIDE_SECS)
+export const landmass = (id: string) => { const z = zoneById(id); const p = z.parent ?? id; return p === 'teldrassil' ? 'tel' : z.continent }
 const mainZone = (id: string) => zoneById(id).parent ?? id
 function walk(a: string, b: string) {
   const za = zoneById(a), zb = zoneById(b)
   return Math.min(150, 25 + Math.hypot(za.x - zb.x, za.y - zb.y) * 1.3)
 }
 
-export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin'; label: string; walkSecs: number; speed: number }
+export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin'; label: string; walkSecs: number; speed: number; blocked?: string }
+// Statki i zeppeliny, które odpływają z tej mapy (port w tej strefie)
+export function portsOf(faction: Faction, zone: string) {
+  const m = mainZone(zone)
+  return TRANSPORTS.map((t, i) => ({ t, i, to: t.a === m ? t.b : t.b === m ? t.a : '' }))
+    .filter((x) => x.to && (x.t.faction === 'neutral' || x.t.faction === faction))
+}
+export const RIDE_SECS = 60
+// Najbliższy port na obecnym lądzie z połączeniem na ląd celu (podpowiedź na mapie)
+export function portHint(faction: Faction, from: string, to: string) {
+  const want = landmass(to)
+  const ok = TRANSPORTS.filter((t) => t.faction === 'neutral' || t.faction === faction)
+  let best: { port: string; t: Transport; secs: number } | null = null
+  for (const t of ok) {
+    for (const [a, b] of [[t.a, t.b], [t.b, t.a]]) {
+      if (landmass(a) !== landmass(from) || landmass(b) !== want) continue
+      const secs = a === mainZone(from) ? 0 : walk(from, a)
+      if (!best || secs < best.secs) best = { port: a, t, secs }
+    }
+  }
+  return best
+}
 export const SUB_WALK = 12 // s między podstrefami
 // speed = premia z formy podróżnej (Ghost Wolf, Travel Form): skraca tylko odcinki piesze
-export function planTrip(faction: Faction, from: string, to: string, speed = 0): TripPlan {
+// allowRide: tylko automatyczne przejście po bossie łączy marsz do portu, rejs i marsz dalej.
+// Gracz z mapy chodzi pieszo po jednym lądzie, a na inny kontynent wsiada sam w porcie.
+export function planTrip(faction: Faction, from: string, to: string, speed = 0, allowRide = false): TripPlan {
   if (from === to) return { total: Math.round(SUB_WALK / (1 + speed)), kind: 'walk', label: '', walkSecs: SUB_WALK, speed }
+  if (!allowRide && landmass(from) !== landmass(to)) {
+    const hint = portHint(faction, from, to)
+    return { total: 0, kind: 'walk', label: '', walkSecs: 0, speed, blocked: hint ? `Inny ląd. Dojdź do portu (${zoneById(hint.port).name}) i wsiądź: ${hint.t.label}.` : 'Inny ląd: brak połączenia dla twojej frakcji.' }
+  }
   const ZS = ZONE_IDS
   const dist: Record<string, number> = {}
   const prev: Record<string, { via: Transport | null; from: string }> = {}

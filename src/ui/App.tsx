@@ -120,8 +120,8 @@ export function App() {
   }
 
   const act = (a: 'town' | 'capital' | 'leave') => {
-    if (a === 'town') { if (!enterTown(game)) toast('Ta mapa nie ma miasta.', '#ff4040') }
-    else if (a === 'capital') { enterCapital(game); setOpen((o) => new Set([...o, 'bags'])) }
+    if (a === 'town') { if (!enterTown(game)) toast(game.phase === 'travel' ? 'Jesteś w podróży.' : 'Ta mapa nie ma miasta.', '#ff4040'); else setOpen((o) => new Set([...o, 'bags'])) }
+    else if (a === 'capital') { const e = enterCapital(game); if (e) toast(e, '#ff4040'); else setOpen((o) => new Set([...o, 'bags'])) }
     else if (a === 'leave') leaveTown(game)
     bump()
   }
@@ -184,7 +184,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — wersja przeglądarkowa (demo 0.5)</b>
+        <b>Azeroth Idle — wersja przeglądarkowa (demo 0.6)</b>
         <span>W aplikacji (Electron) tło jest przezroczyste, a pasek siedzi nad paskiem zadań Windows.</span>
         <span>Skróty: C postać · B torby · L zadania · P umiejętności · N talenty · M mapa · Esc zamyka okna</span>
       </div>

@@ -5,7 +5,7 @@ import { zoneById } from '../data/zones'
 import { talentPoints, spentTotal } from '../data/talents'
 import { xpToNext, MAX_LEVEL, grants, active, styleOf } from '../game/formulas'
 import { stats, activePet, bossState, costOf, cdOf, learnableCount } from '../game/sim'
-import { subOf, subsOf, townOf, capitalOf, zonePct } from '../game/world'
+import { subOf, subsOf, townOf, capitalOf, capitalZone, zonePct } from '../game/world'
 import { capacity, usedSlots } from '../game/inventory'
 import { questReady } from '../game/quests'
 import type { GameState } from '../game/types'
@@ -53,6 +53,9 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   const b = bossState(s)
   const town = townOf(z, h.faction)
   const inTown = s.where !== 'field'
+  const traveling = s.phase === 'travel'
+  const atCapital = s.loc.zone === capitalZone(s)
+  const hearth = h.cds.hearth ?? 0
   const phaseText =
     s.phase === 'fight' && s.mob && s.mob.dist > 0 ? `${s.mob.name}${s.mob.count > 1 ? ` ×${s.mob.count}` : ''} (${s.mob.lvl}) nadchodzi...`
     : s.phase === 'town' ? (s.where === 'capital' ? `W stolicy: ${capitalOf(s)}` : `W mieście: ${town}`)
@@ -65,7 +68,15 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   const cast = h.casting
   const pet = activePet(h)
   const g = grants(h)
-  const bar = c.abilities.filter((a) => active(h, a, g) && a.kind !== 'form' && a.kind !== 'summon' && a.id !== 'totemic_projection')
+  const bar = c.abilities.filter((a) => active(h, a, g) && a.kind !== 'form' && a.kind !== 'summon' && a.kind !== 'buff' && a.kind !== 'proc')
+  // pasek buffów postaci (jak w grze): pasywne buffy, nasycenia, pieczęcie, aury, buffy czasowe, totemy, Well Fed
+  const buffs: { key: string; icon: string; name: string; desc: string; left?: number }[] = []
+  for (const a of c.abilities) {
+    if (!a.travel && (a.kind === 'buff' || a.kind === 'proc') && active(h, a, g)) buffs.push({ key: a.id, icon: abilityIcon(a, h.cls), name: a.name, desc: a.desc })
+    else if ((h.temp[a.id] ?? 0) > 0 && a.buff) buffs.push({ key: a.id, icon: abilityIcon(a, h.cls), name: a.name, desc: a.desc, left: h.temp[a.id] })
+  }
+  for (const t of h.totems) { const a = c.abilities.find((x) => x.id === t.id); if (a?.buff) buffs.push({ key: `tot-${t.id}`, icon: abilityIcon(a, h.cls), name: a.name, desc: `${a.desc} Działa, dopóki stoisz przy totemie.`, left: t.left }) }
+  if (h.wellFed) buffs.push({ key: 'wellfed', icon: itemIcon({ id: -5, name: h.wellFed.name, rarity: 1, ilvl: 1, value: 0 }), name: 'Well Fed', desc: h.wellFed.name, left: h.wellFed.left })
   const learnable = learnableCount(h)
   const freeTalents = talentPoints(h.level) - spentTotal(h.talents)
   const readyQuests = s.quests.filter(questReady).length
@@ -108,7 +119,13 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
           {h.rested > 1 && <div className="prested">zZ</div>}
         </div>
         <div className="unit-bars">
-          <div className="unit-name"><span className="nm">{h.name}</span> <span style={{ color: c.color }}>{c.name}</span></div>
+          <div className="unit-name"><span className="nm">{h.name}</span> <span style={{ color: c.color }}>{c.name}</span>
+            <span className="buffbar">{buffs.map((b) => (
+              <Hover key={b.key} anchor="above" className="buff" tip={<Tip title={b.name}><div>{b.desc}</div>{b.left != null && <div className="tt-dim">Pozostało: {b.left >= 60 ? `${Math.ceil(b.left / 60)} min` : `${Math.ceil(b.left)} s`}</div>}</Tip>}>
+                <img src={b.icon} alt="" draggable={false} />{b.left != null && <span className="buff-t">{b.left >= 60 ? `${Math.ceil(b.left / 60)}m` : Math.ceil(b.left)}</span>}
+              </Hover>
+            ))}</span>
+          </div>
           <Bar value={h.hp} max={d.maxHp} color="linear-gradient(#22d822,#086808)" label={`${Math.ceil(Math.max(0, h.hp))} / ${d.maxHp}`} height={14} />
           <Bar value={h.res} max={d.maxRes} color={RES_COLOR[d.res]} label={d.res === 'mana' ? `${Math.floor(h.res)} / ${d.maxRes}` : `${Math.floor(h.res)}`} height={11} />
           {cast ? (
@@ -143,8 +160,10 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         <div className="town-btns">
           {inTown ? <button className="wbtn" onClick={() => act('leave')}>Wyjdź z miasta</button> : (
             <>
-              {town && <Hover anchor="above" tip={<Tip title={town}>Zadania i trener tej mapy.</Tip>}><button className="wbtn" onClick={() => act('town')}>⌂ {town}</button></Hover>}
-              <Hover anchor="above" tip={<Tip title={capitalOf(s)}>Stolica: trener, kupiec, torby.</Tip>}><button className="wbtn" onClick={() => act('capital')}>♜ {capitalOf(s)}</button></Hover>
+              {town && <Hover anchor="above" tip={<Tip title={town}>{traveling ? 'Jesteś w podróży.' : 'Zadania i kupiec tej mapy.'}</Tip>}><button className="wbtn" disabled={traveling} onClick={() => act('town')}>⌂ {town}</button></Hover>}
+              <Hover anchor="above" tip={<Tip title={capitalOf(s)}>{traveling ? <div>Jesteś w podróży.</div> : atCapital ? <div>Stolica: trener, Weapon Master, kupiec.</div> : <><div>Hearthstone: przenosi cię do stolicy ({zoneById(capitalZone(s)).name}).</div><div className="tt-dim">{hearth > 0 ? `Odnowi się za ${Math.ceil(hearth / 60)} min.` : 'Cooldown 30 min.'} Do stolicy możesz też dojść z mapy.</div></>}</Tip>}>
+                <button className={`wbtn ${!atCapital && hearth > 0 ? 'cooling' : ''}`} disabled={traveling || (!atCapital && hearth > 0)} onClick={() => act('capital')}>{atCapital ? '♜' : '⌂♜'} {capitalOf(s)}{!atCapital && hearth > 0 ? ` (${Math.ceil(hearth / 60)} min)` : ''}</button>
+              </Hover>
             </>
           )}
         </div>

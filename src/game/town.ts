@@ -5,35 +5,50 @@ import { BAGS_FOR_SALE, FOODS, makeBag, makeFood } from './items'
 import { addToInv, equipBag, freeSlots, removeItems, STACK } from './inventory'
 import { questXp, questReady, isQuestItem } from './quests'
 import { gainXp, log, moveTo, stats } from './sim'
-import { canTravel, capitalOf, townOf } from './world'
+import { canTravel, capitalOf, capitalZone, progOf, townOf } from './world'
 import type { GameEvent, GameState, Quest } from './types'
 
 type Emit = (e: GameEvent) => void
 const noop: Emit = () => {}
 
+export const HEARTH_CD = 30 * 60 // Hearthstone (w Classicu 60 min; w idlerze 30)
 export function enterTown(s: GameState) {
   const z = zoneById(s.loc.zone)
-  if (!townOf(z, s.hero.faction)) return false
+  if (s.phase === 'travel' || !townOf(z, s.hero.faction)) return false
   s.where = 'town'
   s.mob = null
   s.hero.casting = null
   return true
 }
-export function enterCapital(s: GameState) {
+// Stolica: wchodzisz pieszo, jeśli jesteś na jej mapie; z innych map tylko Hearthstone (cooldown),
+// który przenosi postać na mapę stolicy.
+export function enterCapital(s: GameState): string | null {
+  if (s.phase === 'travel') return 'Jesteś w podróży.'
+  const cz = capitalZone(s)
+  if (s.loc.zone !== cz) {
+    const cd = s.hero.cds.hearth ?? 0
+    if (cd > 0) return `Hearthstone odnowi się za ${Math.ceil(cd / 60)} min. Do stolicy (${zoneById(cz).name}) możesz też dojść z mapy.`
+    s.hero.cds.hearth = HEARTH_CD
+    s.loc = { zone: cz, sub: 0 }
+    if (!s.unlocked.includes(cz)) s.unlocked.push(cz)
+    progOf(s, cz)
+    s.hero.totems = []
+    log(s, `Hearthstone: przenosisz się do ${capitalOf(s)} (${zoneById(cz).name}).`, '#69ccf0')
+  }
   s.where = 'capital'
   s.mob = null
   s.hero.casting = null
-  return true
+  return null
 }
+export const hearthReady = (s: GameState) => !(s.hero.cds.hearth > 0)
 export function leaveTown(s: GameState) {
   s.where = 'field'
   s.phase = 'walk'
   s.phaseT = 1.5
 }
-export function travel(s: GameState, zone: string, sub: number, emit: Emit = noop) {
-  if (!canTravel(s, zone, sub)) return false
-  moveTo(s, zone, sub, emit)
-  return true
+export function travel(s: GameState, zone: string, sub: number, emit: Emit = noop): string | null {
+  if (!canTravel(s, zone, sub)) return 'Ta podstrefa jest jeszcze zablokowana.'
+  return moveTo(s, zone, sub, emit)
 }
 
 // ---------- trener
@@ -97,7 +112,7 @@ export function trainWeapon(s: GameState, type: string): string | null {
 export const BUYBACK = 10
 export function sellAt(s: GameState, idx: number) {
   const it = s.hero.inv[idx]
-  if (!it || s.where !== 'capital' || it.quest) return 0
+  if (!it || s.where === 'field' || it.quest) return 0
   s.hero.inv[idx] = null
   const v = it.value * (it.count ?? 1)
   s.hero.copper += v
@@ -108,7 +123,7 @@ export function sellAt(s: GameState, idx: number) {
 }
 export function buyBack(s: GameState, i: number): string | null {
   const it = s.buyback[i]
-  if (!it || s.where !== 'capital') return null
+  if (!it || s.where === 'field') return null
   const price = it.value * (it.count ?? 1)
   if (s.hero.copper < price) return 'Za mało pieniędzy.'
   if (!addToInv(s.hero, it)) return 'Brak miejsca w torbach.'
@@ -119,7 +134,7 @@ export function buyBack(s: GameState, i: number): string | null {
 }
 export function buyFood(s: GameState, name: string, n: number): string | null {
   const f = FOODS.find((x) => x.name === name)
-  if (!f || s.where !== 'capital') return null
+  if (!f || s.where === 'field') return null
   const cost = f.price * n
   if (s.hero.copper < cost) return 'Za mało pieniędzy.'
   if (!addToInv(s.hero, makeFood(s.itemSeq++, f, n))) return 'Brak miejsca w torbach.'
@@ -142,14 +157,14 @@ export function restock(s: GameState, stacks = 1) {
   return spent
 }
 export function sellJunk(s: GameState) {
-  if (s.where !== 'capital') return 0
+  if (s.where === 'field') return 0
   let sum = 0
   s.hero.inv.forEach((it, i) => { if (it && it.rarity === 0) sum += sellAt(s, i) })
   return sum
 }
 export function buyBag(s: GameState, size: number): string | null {
   const b = BAGS_FOR_SALE.find((x) => x.size === size)
-  if (!b || s.where !== 'capital') return null
+  if (!b || s.where === 'field') return null
   if (s.hero.copper < b.price) return 'Za mało pieniędzy.'
   const bag = makeBag(s.itemSeq++, size)
   if (s.hero.bags.some((x) => !x)) equipBag(s.hero, bag)

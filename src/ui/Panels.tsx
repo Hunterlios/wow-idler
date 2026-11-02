@@ -6,7 +6,7 @@ import { layout, saveLayout, startDrag, uiScale } from './layout'
 import { classById, ranksOf, trainCost, isMelee, WEAPON_SKILL_PL, type Ability } from '../data/classes'
 import { raceById } from '../data/races'
 import { zoneById } from '../data/zones'
-import { stats, costOf, cdOf } from '../game/sim'
+import { stats, costOf, cdOf, isHybrid } from '../game/sim'
 import { exportSave, importSave } from '../game/save'
 import { isAdmin, unlockAdmin, lockAdmin } from '../game/admin'
 import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, type EquipSlot, type GameState, type Quest } from '../game/types'
@@ -136,7 +136,7 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
   const [offs, setOffs] = useState<Record<string, { dx: number; dy: number }>>(() => Object.fromEntries([0, 1, 2, 3, 4].map((i) => [key(i), layout().frames[key(i)] ?? { dx: 0, dy: 0 }])))
   const offRef = { current: offs }
   const segs = segmentsOf(h)
-  const vendor = s.where === 'capital'
+  const vendor = s.where !== 'field'
   let base = 0
   const blocks = segs.map((seg, i) => {
     const start = base
@@ -157,6 +157,7 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
           }}>
           <img src={itemIcon(i === 0 ? { id: -1, name: 'Backpack', rarity: 1, ilvl: 1, value: 0, bagSize: 16 } : h.bags[i - 1]!)} alt="" draggable={false} /><span>{name}</span>
           {i === 0 && <button className="wbtn small" title="Sortuj torby" onClick={() => { sortBags(h); bump() }}>Sortuj</button>}
+          {i === 0 && <button className="wbtn small" title="Złącz wszystkie torby z powrotem przy prawej krawędzi" onClick={() => { const z = { dx: 0, dy: 0 }; const n = Object.fromEntries([0, 1, 2, 3, 4].map((k) => [key(k), z])); setOffs(n); const fr = { ...layout().frames }; for (const k of Object.keys(n)) fr[k] = z; saveLayout({ frames: fr }) }}>Złącz</button>}
           {i === 0 && <button className="wclose" onClick={onClose}>✕</button>}
         </div>
         <div className="bagwin-grid">
@@ -224,7 +225,7 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
   const capital = s.where === 'capital'
   type Tab = 'quests' | 'trainer' | 'vendor' | 'weapons'
   const [tab, setTab] = useState<Tab>(capital ? 'vendor' : 'quests')
-  const tabs: [Tab, string][] = capital ? [['vendor', 'Kupiec'], ['trainer', 'Trener'], ['weapons', 'Weapon Master']] : [['quests', 'Zadania'], ['trainer', 'Trener']]
+  const tabs: [Tab, string][] = capital ? [['vendor', 'Kupiec'], ['trainer', 'Trener'], ['weapons', 'Weapon Master']] : [['quests', 'Zadania'], ['vendor', 'Kupiec']]
   return (
     <Frame id="city" title={placeName(s)} onClose={onLeave} className="city-frame" icon={menuIcon(capital ? 'capital' : 'town')}>
       <div className="tabs">
@@ -235,7 +236,7 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
       {tab === 'trainer' && <Trainer s={s} bump={bump} toast={toast} />}
       {tab === 'vendor' && <Vendor s={s} bump={bump} toast={toast} />}
       {tab === 'weapons' && <WeaponMaster s={s} bump={bump} toast={toast} />}
-      {!capital && <div className="dim small">Kupiec jest tylko w stolicy ({capitalOf(s)}).</div>}
+      {!capital && <div className="dim small">Trener i Weapon Master są w stolicy ({capitalOf(s)}).</div>}
     </Frame>
   )
 }
@@ -404,6 +405,7 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
   const rest = known.filter((a) => a.kind !== 'form' && a.kind !== 'summon' && !a.group)
   const locked = c.abilities.filter((a) => !knows(h, a, g) && a.kind !== 'form' && a.kind !== 'summon')
   const toggle = (id: string) => { if (h.disabled[id]) delete h.disabled[id]; else h.disabled[id] = true; bump() }
+  const hybrid = isHybrid(h)
   const tipOf = (a: Ability, wrongForm = false) => <div className="tooltip-body"><div className="tt-name">{a.name}</div><div>{a.desc}</div>{a.cost ? <div className="tt-dim">{costOf(h, a, d)} {d.res}</div> : null}{a.cd ? <div className="tt-dim">Cooldown {cdOf(a, d)} s</div> : null}{a.cast ? <div className="tt-dim">Rzucanie {a.cast} s</div> : null}{a.aoe ? <div className="tt-dim">Obszarowe: trafia całą grupę</div> : null}{isMelee(a) ? <div className="tt-dim">Wymaga zwarcia</div> : null}{wrongForm ? <div className="tt-dim">Działa tylko w formie: {a.form ?? a.forms?.join('/')}</div> : null}</div>
   return (
     <Frame id="spells" title="Spellbook" onClose={onClose} className="spell-frame" icon={menuIcon('spell')}>
@@ -422,6 +424,16 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
             <div className="board-sec">Demon</div>
             <div className="sp-forms">
               {pets.map((p) => { const id = p.id.replace('summon_', ''); return <label key={p.id}><input type="radio" checked={h.pet === id} onChange={() => { h.pet = id; bump() }} /> {p.name.replace('Summon ', '')} <span className="pdim">({p.desc.split(':')[1]?.trim()})</span></label> })}
+            </div>
+          </div>
+        )}
+        {hybrid && (
+          <div className="sp-group">
+            <div className="board-sec">Styl walki</div>
+            <div className="sp-forms col">
+              {([['mixed', 'Mieszany', 'czary z dystansu, gdy wróg nadchodzi; w zwarciu ciosy wręcz i tylko natychmiastowe czary'], ['melee', 'Wręcz', 'od razu biegnie do wroga, rzuca tylko natychmiastowe czary'], ['caster', 'Czarami', 'trzyma dystans i rzuca czary także w zwarciu (ciosy wręcz tylko bez many)']] as const).map(([k, l, t]) => (
+                <label key={k}><input type="radio" checked={(h.mode ?? 'mixed') === k} onChange={() => { h.mode = k; bump() }} /> <b>{l}</b> <span className="pdim">— {t}</span></label>
+              ))}
             </div>
           </div>
         )}

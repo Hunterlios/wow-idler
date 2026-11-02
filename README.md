@@ -1,4 +1,4 @@
-# Azeroth Idle (demo 0.5)
+# Azeroth Idle (demo 0.6)
 
 Idle RPG w klimacie WoW Classic. Siedzi jako pasek nad paskiem zadań Windows i gra się sam: bohater chodzi po strefach, walczy, zbiera łup, robi zadania, awansuje i wędruje dalej trasą levelowania swojej frakcji. Gra liczy się też wtedy, gdy jest zamknięta.
 
@@ -62,6 +62,15 @@ npm run balance    # symulacja 24 h gry (gracz zagląda do miasta co godzinę) d
 - **Torby** stoją przy prawej krawędzi; każdą przesuwasz osobno (pozycje się zapisują, dwuklik w tytuł przywraca).
 - **Wybór monitora** w ustawieniach (i w menu ikony w zasobniku).
 - **Tryb testowy:** zmiana prędkości gry tylko po wpisaniu hasła administratora w ustawieniach.
+
+### Nowe w 0.6
+- **Podróż jest prawdziwa:** w trakcie drogi nie da się wybrać innego celu ani wejść do miasta. Mapa odkrywa się dopiero po dotarciu.
+- **Inny kontynent tylko z portu:** na mapie są porty i trasy (⚓ statki, 🎈 zeppeliny). W porcie wsiadasz przyciskiem „Wsiądź”, a dalej idziesz pieszo. Automatyczne przejście po bossie samo idzie do portu.
+- **Stolica:** wchodzisz pieszo, jeśli jesteś na jej mapie. Z innych map działa tylko Hearthstone (cooldown 30 min), który przenosi cię na mapę stolicy.
+- **Mniejsze miasta mają kupca** (sprzedaż, jedzenie, torby, odkup). Trener i Weapon Master są tylko w stolicy.
+- **Pasek buffów** przy ramce postaci: nasycenia broni, pieczęcie, aury, buffy z cooldownów, totemy, Well Fed. Na pasku akcji zostają tylko umiejętności rzucane.
+- **Styl walki hybryd** (szaman, paladyn) w księdze (P): Mieszany (czary z dystansu, w zwarciu ciosy wręcz i tylko natychmiastowe czary), Wręcz (od razu biegnie do wroga), Czarami. Postać bez czarów z dystansu biegnie do wroga sama.
+- **Torby:** przycisk „Złącz” przywraca wszystkie torby na miejsce.
 
 Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classica, bez plików Blizzarda.
 
