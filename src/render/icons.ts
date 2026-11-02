@@ -1,7 +1,7 @@
 // Ikony rysowane proceduralnie na canvasie (własne, w klimacie Classica): przedmioty i umiejętności.
 // Wynik cache'owany jako dataURL.
 import { firstIcon, pickIcon, iconUrl } from './assets'
-import { ABILITY_ICONS, RACIAL_ICONS, MENU_ICONS, RACE_ICON, CLASS_ICON, itemIconGroups } from './iconmap'
+import { ABILITY_ICONS, RACIAL_ICONS, MENU_ICONS, RACE_ICON, CLASS_ICON, ITEM_ICONS, PASSIVE_ICONS, TALENT_ICONS, STATE_ICONS, talentAbility, itemIconGroups } from './iconmap'
 import { JUNK as JUNK_NAMES } from '../game/items'
 import type { Ability, School } from '../data/classes'
 import type { Item } from '../game/types'
@@ -271,6 +271,8 @@ function drawJunk(g: CanvasRenderingContext2D, name: string, rarityColor: string
 // Ikona z assets/icons dla przedmiotu (stabilna dla nazwy), jeśli gracz dostarczył ikony
 function extItemIcon(it: Item): string | null {
   const junkType = !it.slot && it.rarity === 0 ? Object.entries(JUNK_NAMES).find(([, l]) => l.includes(it.name))?.[0] : undefined
+  const named = firstIcon(ITEM_ICONS[it.name])
+  if (named) return named
   const groups = itemIconGroups(it, junkType)
   if (!groups) return null
   for (const g of groups) { const u = pickIcon([g], it.name); if (u) return u }
@@ -531,7 +533,15 @@ const FX_GLYPH: [RegExp, string, School][] = [
   [/^haste/, 'wind', 'physical'], [/^cost|^regen|^resGen|^int|^spi/, 'drops', 'arcane'], [/^cast:/, 'swirl', 'arcane'],
   [/^aoe/, 'ring', 'fire'], [/^dot/, 'drops', 'shadow'], [/^allstat|^ap|^str|^agi/, 'fist', 'holy'], [/^meleeDmg|^dmg|^ab:/, 'sword', 'physical'],
 ]
-export function talentIcon(key: string | undefined, tree: number): string {
+export function talentIcon(key: string | undefined, tree: number, id?: string, cls?: string): string {
+  if (id) {
+    const own = TALENT_ICONS[id] ? iconUrl(TALENT_ICONS[id]) : null
+    if (own) return own
+    const ab = talentAbility(id)
+    const viaAb = ab ? firstIcon(ABILITY_ICONS[ab]) : null
+    if (viaAb) return viaAb
+  }
+  void cls
   const ck = `t|${key}|${tree}`
   const hit = cache.get(ck)
   if (hit) return hit
@@ -545,6 +555,32 @@ export function talentIcon(key: string | undefined, tree: number): string {
   cache.set(ck, url)
   return url
 }
+
+// Pasywna rasówka (po nazwie); brak pliku = rysowana ikona w kolorze szkoły
+const PASSIVE_LOOK: [RegExp, string, string][] = [
+  [/Resistance/, 'bubble', 'nature'], [/Specialization/, 'sword', 'physical'], [/Spirit|Mind/, 'swirl', 'arcane'], [/Endurance|Hardiness/, 'fist', 'physical'],
+  [/Plainsrunning|Quickness/, 'wind', 'nature'], [/Regeneration|Breathing/, 'drops', 'nature'], [/Slaying|Command/, 'target', 'fire'],
+]
+export function passiveIcon(name: string): string {
+  const ext = firstIcon(PASSIVE_ICONS[name])
+  if (ext) return ext
+  const key = `p|${name}`
+  const hit = cache.get(key)
+  if (hit) return hit
+  const m = PASSIVE_LOOK.find(([re]) => re.test(name)) ?? [null, 'orb', 'holy']
+  const g = canvas()
+  const [c1, c2] = SCHOOL_BG[m[2] as keyof typeof SCHOOL_BG]
+  bg(g, shade(c1, -0.35), c2)
+  glyph(g, m[1] as string, shade(c1, 0.2))
+  frame(g)
+  const url = g.canvas.toDataURL()
+  cache.set(key, url)
+  return url
+}
+export const xpIconUrl = () => iconUrl('xp_icon')
+// ikona stanu (z assets) albo zastępcza rysowana ikona rasówki
+export const stateIcon = (k: string, fallback: string) => firstIcon(STATE_ICONS[k]) ?? racialIcon(fallback)
+export const borderUrl = () => iconUrl('default')
 
 // Portret rasy i ikona klasy z assets (null = brak, wtedy UI pokazuje własny znak)
 export const raceIcon = (race: string, female = false) => iconUrl(RACE_ICON(race, female))

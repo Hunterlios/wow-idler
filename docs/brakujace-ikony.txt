@@ -1,0 +1,2 @@
+Wszystkie ikony, których gra szuka (zdolności, talenty, pasywki rasowe, przedmioty, menu, stany wroga), są w assets/icons (stan z wersji 0.9.5).
+Gdy dodasz nowe pliki, uruchom: node scripts/assets-manifest.mjs

@@ -421,7 +421,7 @@ export const TALENTS: Record<ClassId, Talent[]> = {
     t(2, 0, 2, 'cataclysm', 'Cataclysm', 5, [['cost', 0.01]], '−1% cost per rank.'),
     t(2, 1, 1, 'bane', 'Bane', 5, [['cast:shadow_bolt', 0.04], ['cast:immolate', 0.04]], 'Faster Shadow Bolt and Immolate.'),
     t(2, 1, 2, 'aftermath', 'Aftermath', 5, [['dr', 0.002]], 'Fire spells can slow.'),
-    t(2, 2, 0, 'imp_firebolt', 'Improved Firebolt', 2, [['pet', 0.03]], 'Szybszy Firebolt Impa.'),
+    t(2, 2, 0, 'imp_firebolt', 'Improved Firebolt', 2, [['pet', 0.03]], 'Faster Imp Firebolt.'),
     t(2, 2, 1, 'imp_lash', 'Improved Lash of Pain', 2, [['pet', 0.02]], 'More frequent Lash of Pain.'),
     t(2, 2, 2, 'devastation', 'Devastation', 5, [['spellCrit', 0.01]], '+1% crit per rank.'),
     t(2, 3, 1, 'shadowburn_t', 'Shadowburn', 1, [], 'Teaches Shadowburn.', 'shadowburn'),

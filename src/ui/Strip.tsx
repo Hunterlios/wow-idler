@@ -9,8 +9,11 @@ import { subOf, subsOf, townOf, capitalOf, capitalZone, capitalHere, homeOf, zon
 import { capacity, usedSlots } from '../game/inventory'
 import { questReady } from '../game/quests'
 import type { GameState } from '../game/types'
-import { Scene } from '../render/scene'
+import { Scene, type MobAura } from '../render/scene'
+import { createPortal } from 'react-dom'
 import { abilityIcon, itemIcon, menuIcon, racialIcon, raceIcon, classIcon } from '../render/icons'
+import { firstIcon } from '../render/assets'
+const wellFedIcon = () => firstIcon(['spell_misc_food'])
 import { Bar, Hover, Money } from './common'
 import { layout, saveLayout, startDrag, uiScale } from './layout'
 import { beginItemDrag } from './dnd'
@@ -66,6 +69,18 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
     return () => window.removeEventListener('resize', clamp)
   }, [])
 
+  // Tooltip wroga po najechaniu (jak w grze: nazwa, poziom, typ, zdrowie, buffy i debuffy)
+  const [mobTip, setMobTip] = useState<{ x: number; y: number } | null>(null)
+  const onSceneMove = (e: { clientX: number; clientY: number }) => {
+    const sc = sceneRef.current, el = wrap.current
+    const box = sc?.mobBox
+    if (!sc || !el || !box) { if (mobTip) setMobTip(null); return }
+    const r = el.getBoundingClientRect()
+    const k = r.width / Math.max(1, sc.w)
+    const x = (e.clientX - r.left) / k, y = (e.clientY - r.top) / k
+    const inside = x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1
+    setMobTip(inside ? { x: e.clientX, y: e.clientY } : null)
+  }
   const need = xpToNext(h.level)
   const b = bossState(s)
   const town = townOf(z, h.faction)
@@ -103,7 +118,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   }
   if (h.hot) { const a = c.abilities.find((x) => x.id === h.hot!.id); if (a) buffs.push({ key: 'hot', icon: abilityIcon(a, h.cls), name: a.name, desc: `Heals ${Math.round(h.hot.perTick)} every 3 s.`, left: h.hot.left }) }
   if (h.shield > 0) { const a = c.abilities.find((x) => x.kind === 'shield' && knows(h, x, g)); if (a) buffs.push({ key: 'shield', icon: abilityIcon(a, h.cls), name: a.name, desc: `Absorbs ${Math.round(h.shield)} more damage.` }) }
-  if (h.wellFed) buffs.push({ key: 'wellfed', icon: itemIcon({ id: -5, name: h.wellFed.name, rarity: 1, ilvl: 1, value: 0 }), name: 'Well Fed', desc: h.wellFed.name, left: h.wellFed.left })
+  if (h.wellFed) buffs.push({ key: 'wellfed', icon: wellFedIcon() ?? itemIcon({ id: -5, name: h.wellFed.name, rarity: 1, ilvl: 1, value: 0 }), name: 'Well Fed', desc: h.wellFed.name, left: h.wellFed.left })
   const learnable = learnableCount(h)
   const freeTalents = talentPoints(h.level) - spentTotal(h.talents)
   const readyQuests = s.quests.filter(questReady).length
@@ -178,7 +193,8 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         </div>
       </div>
 
-      <div className="scene" ref={wrap}><canvas ref={canvas} /></div>
+      <div className="scene" ref={wrap} onMouseMove={onSceneMove} onMouseLeave={() => setMobTip(null)}><canvas ref={canvas} /></div>
+      {mobTip && s.mob && createPortal(<MobTooltip s={s} auras={sceneRef.current?.mobAuras(s) ?? []} x={mobTip.x} y={mobTip.y} />, document.body)}
 
       <div className="side">
         <div className="zone-name" style={{ color: CONTROL_COLOR[z.control] }}>{z.name} <span className="zr">({z.min}-{z.max})</span></div>
@@ -245,7 +261,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
       </div>
 
       <div className="micro">
-        <MicroBtn icon={menuIcon('char')} label="Character Info (C)" on={open.has('char')} onClick={() => toggle('char')} />
+        <MicroBtn icon={raceIcon(h.race) ?? menuIcon('char')} label="Character Info (C)" on={open.has('char')} onClick={() => toggle('char')} />
         <MicroBtn icon={menuIcon('spell')} label={`Spellbook & Abilities (P)${learnable ? ` · ${learnable} to learn at your trainer` : ''}`} on={open.has('spells')} onClick={() => toggle('spells')} badge={learnable || undefined} />
         <MicroBtn icon={menuIcon('talent')} label={`Talents (N)${freeTalents > 0 ? ` · ${freeTalents} unspent points` : ''}`} on={open.has('talents')} onClick={() => toggle('talents')} badge={freeTalents > 0 ? freeTalents : undefined} />
         <MicroBtn icon={menuIcon('skills')} label="Skills (K)" on={open.has('skills')} onClick={() => toggle('skills')} />
@@ -284,5 +300,29 @@ function MicroBtn({ icon, label, on, onClick, badge, text }: { icon: string; lab
       {text ? <span className="mtext">{text}</span> : <img src={icon} alt="" draggable={false} />}
       {badge ? <span className="mbadge">{badge}</span> : null}
     </Hover>
+  )
+}
+
+const MOB_TYPE: Record<string, string> = { beast: 'Beast', cat: 'Beast', boar: 'Beast', raptor: 'Beast', spider: 'Beast', flyer: 'Beast', insect: 'Beast', humanoid: 'Humanoid', small: 'Humanoid',
+  murloc: 'Humanoid', undead: 'Undead', elemental: 'Elemental', dragon: 'Dragonkin', giant: 'Giant' }
+function MobTooltip({ s, auras, x, y }: { s: GameState; auras: MobAura[]; x: number; y: number }) {
+  const m = s.mob!
+  const W = window.innerWidth
+  const left = Math.max(4, Math.min(x + 16, W - 284))
+  const buffs = auras.filter((a) => a.kind === 'buff'), debuffs = auras.filter((a) => a.kind === 'debuff')
+  const row = (a: MobAura, i: number) => (
+    <div key={i} className="mt-aura"><img src={a.icon} alt="" className={a.kind} /><div><b className={a.kind}>{a.name}</b>{a.left != null && <span className="tt-dim"> · {Math.ceil(a.left)} s</span>}<div className="tt-dim">{a.desc}</div></div></div>
+  )
+  return (
+    <div className="tooltip" style={{ left, bottom: window.innerHeight - y + 12 }}>
+      <div className="tooltip-body">
+        <div className="tt-name">{m.name}{m.count > 1 ? ` ×${m.count}` : ''}</div>
+        <div>Level {m.lvl}{m.boss === 'zone' ? ' Boss' : m.boss === 'mini' ? ' Elite' : ''} {MOB_TYPE[m.type] ?? ''}</div>
+        <div className="tt-dim">Health: {Math.ceil(m.hp).toLocaleString('en-US')} / {Math.ceil(m.maxHp).toLocaleString('en-US')}</div>
+        {buffs.length > 0 && <><div className="mt-sec">Buffs</div>{buffs.map(row)}</>}
+        <div className="mt-sec">Debuffs</div>
+        {debuffs.length ? debuffs.map(row) : <div className="tt-dim">None</div>}
+      </div>
+    </div>
   )
 }

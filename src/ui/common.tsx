@@ -209,6 +209,15 @@ export function keepOnScreen(el: HTMLElement | null, off: { dx: number; dy: numb
 }
 
 // Okno w stylu Classica; przeciągane za pasek tytułu (dwuklik przywraca miejsce)
+// Okno na wierzchu: kliknięte / przeciągane okno (i jego dok) idzie nad pasek gry i nad inne okna
+let TOP_Z = 40
+export function bringToFront(el: HTMLElement | null) {
+  if (!el) return
+  TOP_Z += 1
+  el.style.zIndex = String(TOP_Z)
+  const dock = el.closest('.dock-left, .dock-center, .dock-right') as HTMLElement | null
+  if (dock) dock.style.zIndex = String(TOP_Z)
+}
 export function Frame({ id, title, onClose, children, className, icon, style }: { id?: string; title: ReactNode; onClose?: () => void; children: ReactNode; className?: string; icon?: string; style?: React.CSSProperties }) {
   const saved = id ? layout().frames[id] : undefined
   const [off, setOff] = useState(saved ?? { dx: 0, dy: 0 })
@@ -224,7 +233,7 @@ export function Frame({ id, title, onClose, children, className, icon, style }: 
     return () => window.removeEventListener('resize', fix)
   }, [])
   return (
-    <div ref={box} className={`wframe ${className ?? ''}`} data-solid style={{ ...style, transform: `translate(${off.dx}px, ${off.dy}px)` }}>
+    <div ref={box} className={`wframe ${className ?? ''}`} data-solid style={{ ...style, transform: `translate(${off.dx}px, ${off.dy}px)` }} onPointerDownCapture={() => bringToFront(box.current)}>
       <div className="wframe-head" onDoubleClick={() => { if (id) { setOff({ dx: 0, dy: 0 }); saveLayout({ frames: { ...layout().frames, [id]: { dx: 0, dy: 0 } } }) } }}
         onPointerDown={(e) => {
           if (!id || (e.target as HTMLElement).closest('button')) return

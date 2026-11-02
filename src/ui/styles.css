@@ -531,3 +531,31 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .map-tabs { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
 .map-legend-html { margin-left: auto; font-size: 11px; color: #d8c8a0; }
 .map-legend-html i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px 0 8px; vertical-align: -1px; }
+
+/* 0.9.2: ramka ikon jak w grze (default.png z assets) — na pasku akcji, w torbach, slotach postaci, księdze i talentach */
+.ico-framed .abtn img, .ico-framed .islot img, .ico-framed .bagslot img, .ico-framed .sp-row img, .ico-framed .tal img {
+  box-sizing: border-box; border: 4px solid transparent; border-image: var(--ico-border) 8 / 4px stretch; border-radius: 0; background: #000; }
+.ico-framed .abtn, .ico-framed .bagslot { box-shadow: 0 0 0 1px #000; border-radius: 4px; }
+.ico-framed .sp-row img { box-shadow: none; width: 38px; height: 38px; }
+.ico-framed .islot-empty { inset: 4px; }
+/* kursor gry (gdy okno ma fokus) */
+.has-cursor.game-focus, .has-cursor.game-focus * { cursor: var(--game-cursor) !important; }
+.has-cursor.game-focus.cur-b, .has-cursor.game-focus.cur-b * { cursor: var(--game-cursor-b) !important; }
+/* XP z ikoną w nagrodach zadań */
+.xp-amt { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.xp-ico { width: 14px; height: 14px; border-radius: 2px; box-shadow: 0 0 0 1px #000; vertical-align: -2px; }
+/* tooltip wroga */
+.mt-sec { margin-top: 5px; color: var(--gold-hi); font-weight: bold; font-size: 11px; }
+.mt-aura { display: flex; gap: 6px; align-items: flex-start; margin-top: 3px; }
+.mt-aura img { width: 20px; height: 20px; flex: none; box-shadow: 0 0 0 1px #000, 0 0 0 2px #c02020; }
+.mt-aura img.buff { box-shadow: 0 0 0 1px #000, 0 0 0 2px #20a020; }
+.mt-aura b.debuff { color: #ff6060; } .mt-aura b.buff { color: #60ff60; }
+
+/* 0.9.5: okna zawsze nad paskiem gry; aktywne okno na wierzchu (bringToFront) */
+.strip { z-index: 15; }
+.dock-left, .dock-center, .dock-right { z-index: 30; }
+.toasts { z-index: 9500; }
+.modal { z-index: 9100; }
+.snd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 14px; margin: 2px 0 8px; }
+.snd-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.snd-row { min-width: 0; } .snd-row span { width: 58px; flex: none; } .snd-row input { flex: 1 1 auto; min-width: 0; width: 100%; accent-color: var(--gold); } .snd-row b { flex: none; } .snd-row b { width: 34px; text-align: right; font-weight: normal; color: #ccc; }

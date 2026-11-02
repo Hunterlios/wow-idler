@@ -18,9 +18,16 @@ import { trainerRows, train, trainAll, sellJunk, buyBag, turnIn, placeName, buyB
 import { TravelConfirm } from './MapPanel'
 import { BAGS_FOR_SALE, FOODS, KITS, canWear, makeFood, makeKit } from '../game/items'
 import { townOf, capitalOf, homeOf, progOf, subsOf } from '../game/world'
-import { abilityIcon, itemIcon, menuIcon, talentIcon, racialIcon } from '../render/icons'
+import { abilityIcon, itemIcon, menuIcon, talentIcon, racialIcon, passiveIcon, raceIcon, xpIconUrl } from '../render/icons'
 import { Bar, Frame, Hover, ItemSlotBox, ItemTooltip, Money, Portrait, keepOnScreen } from './common'
 import { isOverlay, native } from '../platform'
+import { uiSound } from '../audio/gamesounds'
+import { soundSettings, setSoundSettings, onSoundSettings, type SoundSettings } from '../audio/sound'
+// Doświadczenie z ikoną XP (jak w nagrodach zadań w grze); bez pliku: sam tekst
+function Xp({ n }: { n: number }) {
+  const u = xpIconUrl()
+  return <span className="xp-amt">{u && <img className="xp-ico" src={u} alt="" draggable={false} />}{n.toLocaleString('en-US')} XP</span>
+}
 
 type Act = { bump: () => void; toast: (t: string, c?: string) => void }
 
@@ -47,7 +54,7 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
   const tip = statTips(h, d)
   const broken = Object.values(h.equip).filter((it) => it?.dur === 0).length
   return (
-    <Frame id="char" title={h.name} onClose={onClose} className="char-frame" icon={menuIcon('char')}>
+    <Frame id="char" title={h.name} onClose={onClose} className="char-frame" icon={raceIcon(h.race) ?? menuIcon('char')}>
       <div className="char-sub">Level {h.level} {r.name} <span style={{ color: c.color }}>{c.name}</span>{h.cls === 'druid' && h.form !== 'caster' ? ` · ${h.form === 'bear' ? 'Bear Form' : h.form === 'cat' ? 'Cat Form' : 'Moonkin Form'}` : ''}{h.wellFed ? <span className="wellfed"> · Well Fed ({Math.ceil(h.wellFed.left / 60)} min)</span> : null}</div>
       <div className="paperdoll">
         <div className="pd-col">{LEFT_SLOTS.map(slot)}</div>
@@ -255,7 +262,7 @@ export function QuestLog({ s, onClose, bump, toast }: { s: GameState; onClose: (
             <p>{q.kind === 'collect' ? `${q.item}: ${q.have}/${q.need}` : `${q.target} slain: ${q.have}/${q.need}`}</p>
             {questReady(q) && <p className="ql-turnin">Turn in at: <b>{townOf(zoneById(q.zone), s.hero.faction)}</b></p>}
             <h4>Rewards</h4>
-            <p>{questXp(s, q).toLocaleString('en-US')} XP · <Money copper={q.copper} /></p>
+            <p><Xp n={questXp(s, q)} /> · <Money copper={q.copper} /></p>
             {q.reward && <div className="ql-reward"><ItemSlotBox item={q.reward} hero={s.hero} /><span style={{ color: ['#9d9d9d', '#fff', '#1eff00', '#0070dd', '#a335ee'][q.reward.rarity] }}>{q.reward.name}</span></div>}
             <div className="ql-btns">
               {(() => {
@@ -296,7 +303,7 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
       {capital && (
         <div className="hearth-row">
           <span className="dim small">Hearthstone: <b>{s.home ?? 'not set'}</b></span>
-          {s.home !== s.inCap && <button className="wbtn small" onClick={() => { const e = bindHearth(s); toast(e ?? `Hearthstone set to: ${s.inCap}`, e ? '#ff4040' : '#ffd100'); bump() }}>Set Hearthstone here</button>}
+          {s.home !== s.inCap && <button className="wbtn small" onClick={() => { const e = bindHearth(s); if (!e) uiSound('ui.bind'); toast(e ?? `Hearthstone set to: ${s.inCap}`, e ? '#ff4040' : '#ffd100'); bump() }}>Set Hearthstone here</button>}
         </div>
       )}
     </Frame>
@@ -313,7 +320,7 @@ function QuestBoard({ s, bump, toast }: { s: GameState } & Act) {
       {ready.map((q) => (
         <div key={q.id} className="board-q ready">
           <span className="qmark">?</span>
-          <div className="bq-main"><b>{q.title}</b><div className="pdim">{questXp(s, q)} XP · <Money copper={q.copper} />{q.reward ? ` · [${q.reward.name}]` : ''}</div></div>
+          <div className="bq-main"><b>{q.title}</b><div className="pdim"><Xp n={questXp(s, q)} /> · <Money copper={q.copper} />{q.reward ? ` · [${q.reward.name}]` : ''}</div></div>
           <button className="wbtn" onClick={() => { const e = turnIn(s, q); if (e) toast(e, '#ff4040'); else toast(`Completed: ${q.title}`); bump() }}>Complete</button>
         </div>
       ))}
@@ -322,7 +329,7 @@ function QuestBoard({ s, bump, toast }: { s: GameState } & Act) {
       {board.map((q) => (
         <div key={q.id} className="board-q">
           <span className="qmark">!</span>
-          <div className="bq-main"><b>[{q.level}] {q.title}</b><div className="pdim">{q.text}</div><div className="pdim">{questXp(s, q)} XP · <Money copper={q.copper} />{q.reward ? <> · <span style={{ color: '#1e8a00' }}>[{q.reward.name}]</span></> : null}</div></div>
+          <div className="bq-main"><b>[{q.level}] {q.title}</b><div className="pdim">{q.text}</div><div className="pdim"><Xp n={questXp(s, q)} /> · <Money copper={q.copper} />{q.reward ? <> · <span style={{ color: '#1e8a00' }}>[{q.reward.name}]</span></> : null}</div></div>
           <button className="wbtn" disabled={s.quests.length >= MAX_QUESTS} onClick={() => { acceptQuest(s, q); bump() }}>Accept</button>
         </div>
       ))}
@@ -349,7 +356,7 @@ function Trainer({ s, bump, toast }: { s: GameState } & Act) {
               <img src={abilityIcon(a, h.cls)} alt="" />
               <div className="tr-main"><b>{r.name}</b> <span className="pdim">Rank {r.rank}{r.status === 'locked' ? ` · requires level ${r.rankLvl}` : ''}</span><div className="pdim">{a.desc}</div></div>
               {r.status === 'known' ? <span className="pdim">Known</span> : r.status === 'available' ? (
-                <button className="wbtn" disabled={h.copper < r.cost} onClick={() => { const e = train(s, r.id); if (e) toast(e, '#ff4040'); bump() }}>Train <Money copper={r.cost} /></button>
+                <button className="wbtn" disabled={h.copper < r.cost} onClick={() => { const e = train(s, r.id); if (e) toast(e, '#ff4040'); else uiSound('ui.learn'); bump() }}>Train <Money copper={r.cost} /></button>
               ) : <span className="pdim"><Money copper={r.cost} /></span>}
             </div>
           )
@@ -376,7 +383,7 @@ function Vendor({ s, bump, toast }: { s: GameState } & Act) {
     const next = all.find((f) => f.lvl > h.level)
     return next ? [...ok, next] : ok
   })
-  const buy = (name: string, n: number) => { const e = buyFood(s, name, n); if (e) toast(e, '#ff4040'); bump() }
+  const buy = (name: string, n: number) => { const e = buyFood(s, name, n); if (e) toast(e, '#ff4040'); else uiSound('ui.coins', 80); bump() }
   const repairCost = repairAllCost(s)
   return (
     <div className="parchment vendor" data-drop="vendor">
@@ -386,7 +393,7 @@ function Vendor({ s, bump, toast }: { s: GameState } & Act) {
         <button className="wbtn" disabled={!junk} onClick={() => { const v = sellJunk(s); toast(`Sold junk for ${(v / 100).toFixed(2)} s`, '#fff'); bump() }}>Sell grey items (<Money copper={junk} />)</button>
         <button className="wbtn" onClick={() => { const v = restock(s, 1); toast(v ? 'Food and drink restocked' : 'You already have enough (or not enough money)', '#fff'); bump() }}>Restock food and drink</button>
         <Hover tip={<div className="tooltip-body"><div className="tt-name">Repair</div><div>Restores full durability of equipped items and items in your bags.</div>{repairDiscount(s) > 0 && <div className="tt-dim">Racial discount: {Math.round(repairDiscount(s) * 100)}%.</div>}</div>}>
-          <button className="wbtn" disabled={!repairCost || h.copper < repairCost} onClick={() => { const e = repairAll(s); toast(e ?? 'Gear repaired', e ? '#ff4040' : '#fff'); bump() }}>🔨 Repair all {repairCost ? <Money copper={repairCost} /> : '(nothing to repair)'}</button>
+          <button className="wbtn" disabled={!repairCost || h.copper < repairCost} onClick={() => { const e = repairAll(s); if (!e) { uiSound('ui.repair'); uiSound('ui.coins', 80) } toast(e ?? 'Gear repaired', e ? '#ff4040' : '#fff'); bump() }}>🔨 Repair all {repairCost ? <Money copper={repairCost} /> : '(nothing to repair)'}</button>
         </Hover>
       </div>
       <div className="tabs small">
@@ -419,7 +426,7 @@ function Vendor({ s, bump, toast }: { s: GameState } & Act) {
                 <div className="pdim">Your character uses it to repair a broken item (up to item level {k.maxIlvl}) between fights.</div></div>
               <span className="vend-buy">
                 <Money copper={k.price} />
-                {[1, 5].map((n) => <button key={n} className="wbtn small" disabled={locked || h.copper < k.price * n} onClick={() => { const e = buyKit(s, k.name, n); if (e) toast(e, '#ff4040'); bump() }}>×{n}</button>)}
+                {[1, 5].map((n) => <button key={n} className="wbtn small" disabled={locked || h.copper < k.price * n} onClick={() => { const e = buyKit(s, k.name, n); if (e) toast(e, '#ff4040'); else uiSound('ui.coins', 80); bump() }}>×{n}</button>)}
               </span>
             </div>
           )
@@ -566,7 +573,7 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
           const cd = id ? h.cds[id] ?? 0 : 0
           return (
             <div key={rc.name} className="sp-row racial">
-              <img src={racialIcon(id ?? 'perception')} alt="" draggable={false} style={id ? undefined : { filter: 'grayscale(.6)' }} />
+              <img src={id ? racialIcon(id) : passiveIcon(rc.name)} alt="" draggable={false} />
               <div className="sp-main"><b>{rc.name}</b>{id ? <span className="sp-tag cd">{cd > 0 ? `ready in ${Math.ceil(cd)} s` : 'ready'}</span> : <span className="sp-tag pas">passive</span>}
                 <div className="pdim">{id ? RACIAL_ACTIVE[id].text : rc.inGame ?? rc.desc}</div></div>
             </div>
@@ -612,9 +619,9 @@ export function TalentsPanel({ s, onClose, bump, toast }: { s: GameState; onClos
                       const rank = h.talents[t.id] ?? 0
                       const can = canLearnTalent(h.cls, h.talents, h.level, t.id)
                       const ab = t.grants ? c.abilities.find((a) => a.id === t.grants) : undefined
-                      const icon = ab ? abilityIcon(ab, h.cls) : talentIcon(t.fx[0]?.[0], tree)
+                      const icon = ab ? abilityIcon(ab, h.cls) : talentIcon(t.fx[0]?.[0], tree, t.id)
                       return (
-                        <Hover key={col} className={`tal ${rank ? 'has' : ''} ${can ? 'can' : ''} ${rank >= t.max ? 'max' : ''}`} onClick={() => { if (learnTalent(s, t.id)) bump() }}
+                        <Hover key={col} className={`tal ${rank ? 'has' : ''} ${can ? 'can' : ''} ${rank >= t.max ? 'max' : ''}`} onClick={() => { if (learnTalent(s, t.id)) { uiSound('ui.talent'); bump() } }}
                           tip={<div className="tooltip-body"><div className="tt-name">{t.name}</div><div className="tt-dim">Rank {rank}/{t.max}{tier ? ` · requires ${tier * 5} points in ${name}` : ''}</div><div>{t.desc}</div>{ab && <div className="tt-dim">Grants ability: {ab.name}</div>}{can && <div style={{ color: '#40ff40' }}>Click to learn</div>}</div>}>
                           <img src={icon} alt="" draggable={false} />
                           <span className="tal-rank">{rank}/{t.max}</span>
@@ -680,6 +687,7 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
           </div>
         )}
         {isOverlay && displays.length > 1 && <div className="dim small">Change the display here or drag the bar by its ⠿ grip onto another monitor.</div>}
+        <SoundSettingsRows />
         <div className="set-row">
           <span>UI scale:</span>
           {(['auto', 0.8, 0.9, 1, 1.1] as const).map((v) => <button key={String(v)} className={`wbtn ${layout().scale === v ? 'on' : ''}`} onClick={() => { saveLayout({ scale: v }); bump() }}>{v === 'auto' ? 'Auto' : `${Math.round(v * 100)}%`}</button>)}
@@ -717,4 +725,22 @@ export { ItemTooltip }
 export function fmtTime(sec: number) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
   return h ? `${h} h ${m} min` : `${m} min`
+}
+
+// Dźwięk: włącz / wyłącz i głośność kanałów (pliki z assets/sound)
+function SoundSettingsRows() {
+  const [st, set] = useState<SoundSettings>(soundSettings())
+  useEffect(() => { const off = onSoundSettings(() => set(soundSettings())); return () => { off() } }, [])
+  const row = (k: keyof Omit<SoundSettings, 'on'>, label: string) => (
+    <label key={k} className="snd-row"><span>{label}</span><input type="range" min={0} max={1} step={0.05} value={st[k]} onChange={(e) => setSoundSettings({ [k]: Number(e.target.value) })} /><b>{Math.round(st[k] * 100)}%</b></label>
+  )
+  return (
+    <div className="snd-box">
+      <div className="set-row"><span>Sound:</span>
+        <button className={`wbtn ${st.on ? 'on' : ''}`} onClick={() => setSoundSettings({ on: true })}>On</button>
+        <button className={`wbtn ${!st.on ? 'on' : ''}`} onClick={() => setSoundSettings({ on: false })}>Off</button>
+      </div>
+      {st.on && <div className="snd-grid">{row('master', 'Master')}{row('sfx', 'Effects')}{row('voice', 'Voices')}{row('ui', 'Interface')}{row('music', 'Music')}{row('ambience', 'Ambience')}</div>}
+    </div>
+  )
 }

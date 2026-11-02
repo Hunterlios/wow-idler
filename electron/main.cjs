@@ -50,6 +50,7 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       backgroundThrottling: false, // gra liczy się także, gdy okno nie ma fokusu
+      autoplayPolicy: 'no-user-gesture-required', // dźwięki gry bez wcześniejszego kliknięcia
     },
   })
   win.setAlwaysOnTop(true, 'screen-saver')
@@ -105,12 +106,27 @@ ipcMain.on('app:dropAt', (e, p) => {
 })
 ipcMain.on('app:quit', () => app.quit())
 // Grafiki gracza (ikony, mapy) z folderu assets: obok exe (wersja przenośna) albo w folderze projektu
+// Kursor z assets/graphics/cursor.png: arkusz 512x256 jak w grze (wycinamy rękawicę 32x32), inny obraz skalujemy do 32 px.
+// Wycinanie w procesie głównym, bo w oknie file:// canvas nie odda danych obrazka z innego pliku.
+const CURSOR_RECT = { x: 260, y: 66, width: 32, height: 32 }
+function cursorFrom(dir) {
+  try {
+    const f = ['cursor.png', 'cursor.webp', 'cursor.gif'].map((n) => path.join(dir, 'graphics', n)).find((p) => fs.existsSync(p))
+    if (!f) return null
+    const img = nativeImage.createFromPath(f)
+    if (img.isEmpty()) return null
+    const { width, height } = img.getSize()
+    const out = width === 512 && height === 256 ? img.crop(CURSOR_RECT) : img.resize({ width: 32, height: Math.round((32 * height) / width) })
+    return out.toDataURL()
+  } catch { return null }
+}
 ipcMain.on('app:assets', (e) => {
   const dirs = [path.join(path.dirname(process.execPath), 'assets'), path.join(__dirname, '..', 'assets'), path.join(__dirname, '..', '..', '..', 'assets')]
   const dir = dirs.find((d) => fs.existsSync(d))
   if (!dir) { e.returnValue = null; return }
   const list = (sub) => { try { return fs.readdirSync(path.join(dir, sub)).filter((f) => /\.(jpg|jpeg|png|webp|gif)$/i.test(f)) } catch { return [] } }
-  e.returnValue = { base: pathToFileURL(dir).href + '/', icons: list('icons'), graphics: list('graphics') }
+  const soundDir = ['sound', 'sounds'].find((d) => fs.existsSync(path.join(dir, d))) ?? null
+  e.returnValue = { base: pathToFileURL(dir).href + '/', icons: list('icons'), graphics: list('graphics'), cursor: cursorFrom(dir), soundDir }
 })
 ipcMain.on('app:autostart', (_e, on) => app.setLoginItemSettings({ openAtLogin: !!on }))
 ipcMain.on('app:autostart:get', (e) => { e.returnValue = app.getLoginItemSettings().openAtLogin })

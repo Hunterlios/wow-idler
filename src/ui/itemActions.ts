@@ -7,6 +7,7 @@ import { syncQuests } from '../game/quests'
 import { formatMoney } from '../game/formulas'
 import type { EquipSlot, GameState } from '../game/types'
 import type { DragSrc } from './dnd'
+import { itemDrop, uiSound } from '../audio/gamesounds'
 
 type Res = { msg: string; color?: string } | null
 const money = (c: number) => { const m = formatMoney(c); return [m.g && `${m.g} g`, m.s && `${m.s} s`, (m.c || (!m.g && !m.s)) && `${m.c} c`].filter(Boolean).join(' ') }
@@ -18,6 +19,7 @@ function sell(s: GameState, idx: number): Res {
   if (it.quest) return err('Quest items can\'t be sold.')
   const v = sellAt(s, idx)
   syncQuests(s)
+  uiSound('ui.coins', 80)
   return { msg: `Sold ${it.name}${(it.count ?? 1) > 1 ? ` ×${it.count}` : ''} for ${money(v)} (buy it back in the Buyback tab)`, color: '#ffffff' }
 }
 
@@ -27,13 +29,16 @@ export function rightClickInv(s: GameState, idx: number): Res {
   const it = h.inv[idx]
   if (!it) return null
   if (s.where !== 'field') return sell(s, idx)
-  if (it.food) { const e = useItem(s, idx); stats(h); return e ? err(e) : { msg: `${it.name}: Well Fed`, color: '#40ff40' } }
-  if (it.bagSize || it.slot) return err(equipFromInv(h, idx))
+  if (it.food) { const e = useItem(s, idx); stats(h); if (!e) uiSound(it.food.kind === 'drink' ? 'ui.drink' : 'ui.eat', 300); return e ? err(e) : { msg: `${it.name}: Well Fed`, color: '#40ff40' } }
+  if (it.bagSize || it.slot) { const e = equipFromInv(h, idx); if (!e) itemDrop(it); return err(e) }
   return null
 }
 
 export function rightClickEquip(s: GameState, slot: EquipSlot): Res {
-  return err(unequip(s.hero, slot))
+  const it = s.hero.equip[slot]
+  const e = unequip(s.hero, slot)
+  if (!e && it) itemDrop(it)
+  return err(e)
 }
 
 export function dropItem(s: GameState, src: DragSrc, target: string | null): Res {

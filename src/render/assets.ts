@@ -3,8 +3,8 @@
 // Gdy pliku brak, gra rysuje własne ikony i mapę.
 import { native } from '../platform'
 
-type Manifest = { base: string; icons: string[]; graphics: string[] }
-type Lib = { base: string; icons: Map<string, string>; graphics: Map<string, string>; byPrefix: Map<string, string[]> }
+type Manifest = { base: string; icons: string[]; graphics: string[]; cursor?: string | null; soundDir?: string | null }
+type Lib = { base: string; icons: Map<string, string>; graphics: Map<string, string>; byPrefix: Map<string, string[]>; cursor: string | null; soundDir: string | null }
 
 let lib: Lib | null = null
 function load(): Lib {
@@ -13,7 +13,7 @@ function load(): Lib {
   try { m = native?.getAssets?.() ?? null } catch { m = null }
   if (!m && typeof window !== 'undefined') {
     const w = (window as unknown as { AZ_ASSETS?: Partial<Manifest> }).AZ_ASSETS
-    if (w) m = { base: w.base ?? 'assets/', icons: w.icons ?? [], graphics: w.graphics ?? [] }
+    if (w) m = { base: w.base ?? 'assets/', icons: w.icons ?? [], graphics: w.graphics ?? [], soundDir: w.soundDir ?? null }
   }
   const strip = (f: string) => f.replace(/\.(jpg|jpeg|png|webp|gif)$/i, '').toLowerCase()
   lib = {
@@ -21,6 +21,8 @@ function load(): Lib {
     icons: new Map((m?.icons ?? []).map((f) => [strip(f), f])),
     graphics: new Map((m?.graphics ?? []).map((f) => [strip(f), f])),
     byPrefix: new Map(),
+    cursor: m?.cursor ?? null,
+    soundDir: m?.soundDir ?? null,
   }
   return lib
 }
@@ -43,7 +45,10 @@ export function pickIcon(prefixes: string[], key: string): string | null {
   const pk = prefixes.join('|')
   let list = l.byPrefix.get(pk)
   if (!list) {
-    list = [...l.icons.keys()].filter((n) => prefixes.some((p) => n.startsWith(p))).sort()
+    const all = [...l.icons.keys()].filter((n) => prefixes.some((p) => n.startsWith(p))).sort()
+    // nazwy w stylu Classica (prefiks + numer do 99) mają pierwszeństwo przed nowszymi ikonami z dodatków
+    const classic = all.filter((n) => prefixes.some((p) => n.startsWith(p) && /^\d{1,2}[ab]?$/.test(n.slice(p.length))))
+    list = classic.length >= 3 ? classic : all
     l.byPrefix.set(pk, list)
   }
   if (!list.length) return null
@@ -51,8 +56,36 @@ export function pickIcon(prefixes: string[], key: string): string | null {
   for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619)
   return iconUrl(list[(h >>> 0) % list.length])
 }
+// Adres pliku dźwiękowego (ścieżka względna w assets/sound), gdy gracz dostarczył folder z dźwiękami
+export function soundUrl(rel: string): string | null {
+  const l = load()
+  if (!l.soundDir) return null
+  return `${l.base}${l.soundDir}/${rel.split('/').map(encodeURIComponent).join('/')}`
+}
 export function graphicUrl(name: string): string | null {
   const l = load()
   const f = l.graphics.get(name.toLowerCase())
   return f ? `${l.base}graphics/${f}` : null
+}
+
+// Kursor gry (32x32, data URL). Electron wycina go w procesie głównym; w przeglądarce wycinamy z arkusza na canvasie.
+export async function cursorUrl(): Promise<string | null> {
+  const l = load()
+  if (l.cursor) return l.cursor
+  const src = graphicUrl('cursor')
+  if (!src || typeof document === 'undefined') return null
+  return new Promise((res) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas'); c.width = 32; c.height = 32
+        const g = c.getContext('2d')!
+        if (img.width === 512 && img.height === 256) g.drawImage(img, 260, 66, 32, 32, 0, 0, 32, 32)
+        else g.drawImage(img, 0, 0, 32, Math.round((32 * img.height) / img.width))
+        res(c.toDataURL())
+      } catch { res(null) }
+    }
+    img.onerror = () => res(null)
+    img.src = src
+  })
 }

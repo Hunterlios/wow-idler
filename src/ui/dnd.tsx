@@ -13,6 +13,8 @@ const notify = () => subs.forEach((f) => f())
 let handler: (src: DragSrc, target: string | null) => void = () => {}
 export const setDropHandler = (f: typeof handler) => { handler = f }
 export const isDragging = () => !!current
+let pickHandler: (src: DragSrc) => void = () => {}
+export const setPickHandler = (f: typeof pickHandler) => { pickHandler = f }
 
 // Na pointerdown slotu: przeciąganie zaczyna się dopiero po przesunięciu o kilka pikseli (zwykły klik działa dalej)
 export function beginItemDrag(e: RPointerEvent, src: DragSrc, icon: string) {
@@ -21,7 +23,7 @@ export function beginItemDrag(e: RPointerEvent, src: DragSrc, icon: string) {
   let started = false
   const move = (ev: PointerEvent) => {
     if (!started && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return
-    if (!started) { started = true; setDragging(true); document.body.classList.add('dragging-item') }
+    if (!started) { started = true; setDragging(true); document.body.classList.add('dragging-item'); pickHandler(src) }
     current = { src, icon, x: ev.clientX, y: ev.clientY }
     notify()
   }

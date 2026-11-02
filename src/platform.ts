@@ -12,7 +12,7 @@ export type NativeBridge = {
   onPlace?: (cb: (p: { x: number; y: number }) => void) => void
   onReset?: (cb: () => void) => void
   onDisplay?: (cb: () => void) => () => void
-  getAssets?: () => { base: string; icons: string[]; graphics: string[] } | null
+  getAssets?: () => { base: string; icons: string[]; graphics: string[]; cursor?: string | null; soundDir?: string | null } | null
 }
 
 declare global {
@@ -30,6 +30,13 @@ export function setDragging(on: boolean) {
   if (native && on && !solid) { solid = true; native.setSolid(true) }
 }
 
+// Po powrocie myszy nad grę (okno znów łapie mysz) Chromium nie odświeża kursora, bo CSS się nie zmienił,
+// a system pokazał w międzyczasie swój. Przełączamy więc na równoważną kopię kursora gry, co wymusza odświeżenie.
+export function refreshCursor() {
+  const r = document.documentElement
+  r.classList.toggle('cur-b')
+}
+
 // W trybie nakładki okno przepuszcza kliknięcia wszędzie poza elementami z [data-solid].
 export function installClickThrough() {
   if (!native) return
@@ -37,7 +44,7 @@ export function installClickThrough() {
     if (dragging) return
     const el = document.elementFromPoint(x, y)
     const s = !!el?.closest('[data-solid]')
-    if (s !== solid) { solid = s; native.setSolid(s) }
+    if (s !== solid) { solid = s; native.setSolid(s); if (s) refreshCursor() }
   }
   window.addEventListener('mousemove', (e) => check(e.clientX, e.clientY), { passive: true })
   window.addEventListener('mouseleave', () => { if (solid && !dragging) { solid = false; native.setSolid(false) } })

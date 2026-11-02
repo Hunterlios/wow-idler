@@ -109,6 +109,49 @@ npm run balance    # symulacja 24 h gry (gracz zagląda do miasta co godzinę) d
 
 Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classica, bez plików Blizzarda.
 
+### Nowe w 0.9.2
+- Przycisk „Character Info” i okno postaci mają ikonę rasy.
+- Ikony jedzenia, picia, zestawów naprawczych i śmieci dobrane ręcznie po nazwie (chleb to chleb, śmieci z humanoidów to szmaty, świeczki, zębatki, a nie monety).
+- Ikona XP przy nagrodach w dzienniku zadań i na tablicy zadań.
+- Najechanie na wroga pokazuje tooltip: poziom, typ, zdrowie, buffy (Elite / Boss) i debuffy z opisem i czasem.
+- Ikony talentów jak w Classicu (gdy plik jest w assets/icons); „Improved X” bez własnej ikony bierze ikonę zdolności X. Lista brakujących plików: docs/brakujace-ikony.txt.
+- Ramka ikon z assets/icons/default.png na pasku akcji, w torbach, slotach postaci, księdze i talentach.
+- Kursor gry z assets/graphics/cursor.png (wycinana rękawica 32×32), aktywny, gdy okno gry ma fokus.
+- Pasywki rasowe mają własne ikony. Taurenowe Cultivation (Herbalism) zastąpione pasywką Plainsrunning: +10% szybsze podróże.
+- Ostatnie polskie opisy zdolności przetłumaczone.
+
+### Nowe w 0.9.3
+- Nowe pikselowe sprite'y bohatera (styl chibi wzorowany na grafice referencyjnej): 8 ras × 9 klas, generowane w kodzie (src/render/sprites.ts) z konturem i cieniowaniem.
+- Animacje: idle 8, chód 8, atak 8, strzał z łuku/broni palnej 8, rzucanie czaru 8, trafienie 4, śmierć 8 klatek, odpoczynek 2.
+- Cechy ras (rogi i pysk taurena, kły orków i trolli, irokez trolla, broda krasnoluda, gogle gnoma, uszy i świecące oczy nocnych elfów, szczęka nieumarłych) i stroje klas (płyta wojownika, złota zbroja paladyna, kołczan łowcy, kaptury łotrzyka i czarnoksiężnika, szaty kapłana i maga, poroże druida).
+- Broń w ręce według ekwipunku, tarcza na drugiej ręce; przy śmierci broń wypada na ziemię.
+- Formy druida (niedźwiedź, kot, moonkin, gepard w podróży) i duch wilka szamana jako pikselowe sprite'y z animacją.
+
+### Nowe w 0.9.4
+- Cała scena w jednym pikselowym stylu: moby, NPC, pupile, totemy, tła, miasta, statek i zeppelin używają tych samych części ciała, konturu i skali pikseli co bohater.
+- Moby (src/render/mobsprites.ts): wygląd z typu i nazwy — m.in. Defias w chustach, gnolle, quilboary z kolcami, kobold ze świeczką, gobliny w kaskach, trolle, orkowie, satyry, centaury, furbolgi, worgeny, harpie, gargulce, naga, murloki, szkielety, ghule, ogry, golemy, abominacje; wilki, niedźwiedzie, koty (pręgi / cętki), dziki, krokoliski, bazyliszki, żółwie, raptory, pająki, skorpidy, sępy, nietoperze, sowy, plainstridery, pisklęta smoków, żywiołaki ognia, ziemi, powietrza, szlamy, lashery i drzewce.
+- Animacje mobów: postój, podchodzenie, atak, trafienie, śmierć (dwunogi padają na plecy, zwierzęta przewracają się łapami do góry, żywiołaki się rozpadają). Grupy mobów stoją jeden za drugim.
+- Tła (src/render/backdrop.ts): niebo w pasach z ditheringiem, gwiazdy nocą, pikselowe słońce / księżyc i chmury, trzy warstwy wzgórz z paralaksą, rekwizyty każdego z 13 biomów (drzewa, akacje, sosny, kaktusy, nagrobki, palmy, namorzyny, wulkaniczne iglice...), ziemia z teksturą i trawa na pierwszym planie.
+- Miasta: domy Przymierza z niebieskimi dachami, namioty Hordy z kośćmi i sztandarami, krypty Undercity z zieloną poświatą; NPC (zleceniodawca / trener klasy, kupiec, strażnik) w tym samym stylu.
+- Debuffy wroga wiszą nad tabliczką z imieniem, jak w grze.
+
+### Nowe w 0.9.5
+- Ikony: gra korzysta z pełnego zestawu ~13 tys. ikon z assets/icons — wszystkie zdolności, talenty, pasywki rasowe, przedmioty (jedzenie, picie, śmieci, zestawy), menu, plecak, ikony umiejętności broni, stany wroga (ogłuszenie, spowolnienie, obezwładnienie, elita, boss) i Well Fed mają ikony jak w Classicu. Losowe ikony ekwipunku wybierane są spośród klasycznych numerów (np. inv_sword_04), a nie z nowszych dodatków.
+- Dźwięki (src/audio): system dźwięku z kanałami efekty / głosy / interfejs / muzyka / ambient i ustawieniami głośności w oknie Settings. Pliki czytane z assets/sound, mapa zdarzeń wygenerowana z listy plików (scripts/gen-soundmap.py → src/audio/soundmap.ts):
+  - walka: zamach i trafienie zależne od broni bohatera i materiału celu (ciało, kolczuga, płyta, kamień, drewno), krytyki, pudła, parowania, bloki, łuk i strzelba, pazury bestii;
+  - okrzyki i jęki bohatera jego rasy (atak, rana, krytyk, śmierć, okrzyk przy Blood Fury / Berserking), głosowe komunikaty błędów (pełne torby, brak pieniędzy);
+  - ~250 zdolności z własnym dźwiękiem (Fireball, Frostbolt, Charge, Execute, Moonfire, Renew...), pozostałe czary dźwięk szkoły magii;
+  - moby: agresja, atak, rana i śmierć dla 56 rodzajów stworów (wilki, kobold, murloki, gnolle, ogry, pająki, żywiołaki...);
+  - interfejs: otwieranie i zamykanie okien, przyciski, podnoszenie i odkładanie przedmiotów wg materiału, łup, monety, zadania (przyjęcie, postęp, ukończenie), awans, odkrycie strefy, powitania NPC w mieście, Hearthstone, naprawa, trener, talenty, jedzenie i picie;
+  - muzyka strefy wg biomu, muzyka stolic i karczm w miastach, muzyka ducha po śmierci; ambient strefy, morze w rejsie, wiatr w zeppelinie.
+- Okna menu zawsze nad paskiem gry; kliknięte / przeciągane okno wychodzi na wierzch.
+- scripts/assets-manifest.mjs tworzy też assets/lista-plikow.txt; scripts/assets-used.mjs kopiuje również używane dźwięki.
+- Poprawka: okno postaci mogło zawiesić grę (pierwsza klatka podglądu z ujemnym czasem).
+
+### Nowe w 0.9.6
+- Suwaki głośności w Settings mieszczą się w oknie.
+- Kursor gry: w exe działa zawsze nad elementami gry (nie tylko, gdy okno ma fokus) i odświeża się po powrocie myszy z pulpitu (wcześniej np. nad torbami zostawał kursor systemowy).
+
 ## Struktura
 
 ```

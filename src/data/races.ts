@@ -88,7 +88,7 @@ export const RACES: Race[] = [
     blurb: 'An ancient race from the island of Teldrassil, guardians of nature and followers of Elune.',
     racials: [
       { name: 'Shadowmeld', desc: 'Active: hide in the shadows while standing still.', inGame: 'Below 10% health: escape the fight without dying (5 min CD)' },
-      { name: 'Quickness', desc: 'Dodge chance increased by 1%.', inGame: '+1% uniku' },
+      { name: 'Quickness', desc: 'Dodge chance increased by 1%.', inGame: '+1% dodge' },
       { name: 'Wisp Spirit', desc: 'Moves 50% faster as a ghost.', inGame: 'Shorter corpse run' },
       { name: 'Nature Resistance', desc: '+10 Nature resistance.', inGame: '2% less damage taken' },
     ],
@@ -154,7 +154,7 @@ export const RACES: Race[] = [
     racials: [
       { name: 'War Stomp', desc: 'Active: stuns up to 5 enemies for 2 s.', inGame: 'Stuns enemies for 2 s when they reach melee range (2 min CD)' },
       { name: 'Endurance', desc: 'Base health increased by 5%.', inGame: '+5% HP' },
-      { name: 'Cultivation', desc: '+15 Herbalism skill (in this game: plains wanderers).', inGame: 'Walking between zones is 10% faster' },
+      { name: 'Plainsrunning', desc: 'Replaces Cultivation (+15 Herbalism), since there are no professions here: the tauren are born wanderers of the Mulgore plains.', inGame: 'Walking between zones is 10% faster' },
       { name: 'Nature Resistance', desc: '+10 Nature resistance.', inGame: '2% less damage taken' },
     ],
     look: { skin: '#7a5236', hair: '#2e1d12', height: 30, width: 16, feature: 'horns' },
@@ -169,7 +169,7 @@ export const RACES: Race[] = [
     blurb: 'The Darkspear tribe, rescued by Thrall and settled on the coast of Durotar.',
     racials: [
       { name: 'Berserking', desc: 'Active: increases attack and casting speed by 10-30% for 10 s.', inGame: 'At the start of a fight: +10-30% speed for 10 s (3 min CD)' },
-      { name: 'Regeneration', desc: 'Health regeneration increased by 10%; 10% of it works in combat.', inGame: '+10% regeneracji HP' },
+      { name: 'Regeneration', desc: 'Health regeneration increased by 10%; 10% of it works in combat.', inGame: '+10% health regeneration' },
       { name: 'Beast Slaying', desc: '+5% damage dealt to beasts.', inGame: '+5% damage vs beasts' },
       { name: 'Throwing / Bow Specialization', desc: '+5 Bows and Thrown skill.', inGame: '+5 Bows and Thrown skill' },
     ],
