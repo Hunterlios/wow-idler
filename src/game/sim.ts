@@ -12,7 +12,7 @@ import { addToInv, fixInv, countItems, autoEquip, equipUpgrades } from './invent
 import { muleTick, sendMule } from './companions'
 import { syncQuests } from './quests'
 import { makeRng, type Rng } from './rng'
-import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, planTrip, portsOf, knownOf } from './world'
+import { subsOf, subOf, progOf, subMobs, subLevels, killsNeeded, bossLevel, bossLook, routeZones, nextRouteZone, planTrip, portsOf, knownOf, SUB_WALK } from './world'
 import type { GameEvent, GameState, Hero, Item, MobState, OfflineSummary } from './types'
 import { HEAL_DEFAULT } from './types'
 import { ranksOf } from '../data/classes'
@@ -170,7 +170,7 @@ function tick(s: GameState, dt: number, rng: Rng, emit: Emit) {
     const perTick = h.cls === 'mage' || h.cls === 'priest' ? 12.5 + d.spi / 4 : 15 + d.spi / 5
     const inCombatPct = Math.min(1, (d.m.regen ?? 0) + (d.m.castRegen ?? 0))
     const k = h.sinceCast >= 5 ? 1 : inCombatPct
-    h.res = Math.min(d.maxRes, h.res + (perTick / 2) * dt * k)
+    h.res = Math.min(d.maxRes, h.res + (perTick / 2) * dt * k + ((d.m.mp5 ?? 0) / 5) * dt) // mp5 działa też w trakcie rzucania
   }
   if (h.hot) {
     h.hot.left -= dt
@@ -361,6 +361,7 @@ export function useItem(s: GameState, idx: number): string | null {
   if (it.food.lvl > h.level) return `Requires level ${it.food.lvl}.`
   if (it.food.kind !== 'buff') return 'Your character eats and drinks automatically while resting.'
   if (s.phase === 'fight') return 'You can\'t eat in combat.'
+  if (s.phase === 'dead' || h.hp <= 0) return 'You can\'t eat while dead.'
   consume(h, idx)
   h.wellFed = { name: it.name, fx: it.food.buff!.fx, left: WELL_FED }
   log(s, `${it.name}: Well Fed (${it.food.buff!.text}, 15 min).`, '#40ff40')
@@ -1337,13 +1338,12 @@ function onKill(s: GameState, rng: Rng, emit: Emit) {
     p.bossHold = undefined
     emit({ t: 'cleared', zone: s.loc.zone, sub: s.loc.sub, boss: mob.name, zoneBoss: sz.zoneBoss })
     if (sz.zoneBoss) {
-      const r = routeZones(s)
-      const next = r[r.indexOf(s.loc.zone) + 1]
+      const next = nextRouteZone(s, s.loc.zone)
       log(s, `${mob.name} defeated! ${zoneById(s.loc.zone).name} completed.`, '#ff8040')
       if (next) log(s, `Next zone on your route: ${zoneById(next).name} (${zoneById(next).min}-${zoneById(next).max})`, '#69ccf0')
       if (next && s.autoAdvance) { moveTo(s, next, 0, emit, true); return }
     } else {
-      log(s, `${mob.name} pokonany! Odblokowano: ${subs[s.loc.sub + 1].name}`, '#ff8040')
+      log(s, `${mob.name} defeated! Unlocked: ${subs[s.loc.sub + 1].name}`, '#ff8040')
       if (s.autoAdvance) { moveTo(s, s.loc.zone, s.loc.sub + 1, emit, true); return }
     }
   } else if (s.loc.sub === p.cleared && p.cleared < subs.length) {
@@ -1401,8 +1401,39 @@ export function moveTo(s: GameState, zone: string, sub: number, emit: Emit = noo
   const plan = tripPlan(s, zone, sub, auto)
   if (plan.blocked) return plan.blocked
   const origin = { zone: s.loc.zone, sub: s.loc.sub }
-  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Podróż' : 'Marsz'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub }, path: plan.path, origin }, plan.total)
-  log(s, `${plan.label || `Podróż: ${plan.fromName} → ${plan.toName}`} (${plan.total} s${plan.form ? `, ${plan.form}` : ''})`, '#69ccf0')
+  // trasa z transportem (statek / zeppelin / tramwaj): po kolei — marsz do portu, rejs, marsz dalej.
+  // Każdy odcinek to osobna podróż; po dotarciu do portu postać dopiero wsiada.
+  const steps = plan.steps ?? []
+  // transport odjeżdża z tej mapy, ale postać nie stoi w porcie: najpierw dojście do przystani / wieży / tramwaju
+  if (steps[0]?.ride && s.atPort !== s.loc.zone) {
+    const ride = steps[0].ride
+    const secs = Math.max(8, Math.round(2 * SUB_WALK / (1 + (plan.speed ?? 0))))
+    const here = zoneById(s.loc.zone).name
+    const label = `Walking to the ${portWord(ride.kind)}: ${ride.label.split(':')[1]?.split('↔')[ride.a === s.loc.zone ? 0 : 1]?.trim() ?? here}`
+    startTrip(s, { kind: 'walk', label, total: secs, from: plan.fromName, to: `${here} (${portWord(ride.kind)})`, form: plan.form, dest: { zone: s.loc.zone, sub: s.loc.sub }, path: [], origin, final: { zone, sub }, port: true }, secs)
+    log(s, `${label} (${secs} s). Final destination: ${plan.toName}.`, '#69ccf0')
+    return null
+  }
+  s.atPort = undefined
+  if (steps.some((x) => x.ride) && steps.length > 1) {
+    const seg = steps[0].ride ? [steps[0]] : steps.slice(0, steps.findIndex((x) => x.ride))
+    const end = seg[seg.length - 1].zone
+    if (end !== zone) {
+      const ride = seg[0].ride
+      const total = Math.max(1, Math.round(seg.reduce((a, x) => a + x.secs, 0)))
+      let at = 0
+      const path = seg.map((x) => ({ zone: x.zone, at: Math.round((at += x.secs)) }))
+      const p = progOf(s, end)
+      const endSub = Math.min(p.cleared, subsOf(end).length - 1)
+      const toName = ride ? `${zoneById(end).name} (${ride.label.split(':')[0]})` : `${zoneById(end).name} (port)`
+      const label = ride ? ride.label : `Walking to the ${portWord(steps.find((x) => x.ride)!.ride!.kind)}: ${zoneById(end).name}`
+      startTrip(s, { kind: ride ? ride.kind : 'walk', label, total, from: plan.fromName, to: toName, form: ride ? undefined : plan.form, dest: { zone: end, sub: endSub }, path, origin, final: { zone, sub }, port: !ride }, total)
+      log(s, `${label} (${total} s). Final destination: ${plan.toName}.`, '#69ccf0')
+      return null
+    }
+  }
+  startTrip(s, { kind: plan.kind, label: plan.label || `${zone !== s.loc.zone ? 'Travel' : 'Walk'}: ${plan.toName}`, total: plan.total, from: plan.fromName, to: plan.toName, form: plan.form, dest: { zone, sub }, path: plan.path, origin }, plan.total)
+  log(s, `${plan.label || `Travel: ${plan.fromName} → ${plan.toName}`} (${plan.total} s${plan.form ? `, ${plan.form}` : ''})`, '#69ccf0')
   return null
 }
 
@@ -1462,8 +1493,11 @@ export function ride(s: GameState, index: number, emit: Emit = noop): string | n
   return null
 }
 
+const portWord = (k: string) => k === 'ship' ? 'harbor' : k === 'zeppelin' ? 'zeppelin tower' : 'tram'
 function arrive(s: GameState, emit: Emit) {
   const dest = s.trip?.dest
+  const final = s.trip?.final
+  const port = !!s.trip?.port
   s.phase = 'walk'
   s.phaseT = 1
   s.trip = null
@@ -1477,6 +1511,9 @@ function arrive(s: GameState, emit: Emit) {
   progOf(s, dest.zone)
   if (changed) emit({ t: 'zone', zone: dest.zone })
   emit({ t: 'sub', zone: dest.zone, sub: dest.sub })
+  // kolejny odcinek trasy (z portu: rejs; po rejsie: marsz do celu)
+  s.atPort = port ? dest.zone : undefined
+  if (final && (final.zone !== dest.zone || final.sub !== dest.sub || port)) moveTo(s, final.zone, final.sub, emit, true)
 }
 
 export function gainXp(s: GameState, amt: number, emit: Emit) {
@@ -1720,7 +1757,7 @@ export function abilityInfo(h: Hero, a: Ability, d = stats(h)): string[] {
     const fx = Object.entries(a.buff).filter(([k]) => k !== 'instant' && k !== 'noPet').map(([k, v]) => {
       const flat = ['ap', 'sta', 'int', 'spi', 'all', 'str', 'agi', 'sp'].includes(k)
       const val = flat ? `+${Math.round((v ?? 0) * scale)}` : k === 'immune' ? '' : `${(v ?? 0) > 0 ? '+' : ''}${Math.round((v ?? 0) * 100)}%`
-      const PL: Record<string, string> = { ap: 'attack power', sta: 'Stamina', int: 'Intellect', spi: 'Spirit', all: 'all attributes', str: 'Strength', agi: 'Agility', armor: 'armor', dr: 'damage reduction', crit: 'critical strike', spellCrit: 'spell crit', dodge: 'dodge', haste: 'attack speed', dmg: 'damage', meleeDmg: 'physical damage', castRegen: 'in-combat mana regeneration', immune: 'invulnerability', allPct: 'all attributes', petDmg: 'pet damage', energy: 'Energy regeneration', resGen: 'Rage generation', lifesteal: 'healing from Shadow damage', sp: 'spell power', hit: 'hit', sweep: 'damage vs groups (second target)', retal: 'counterattack', cost: 'cost', shadow: 'Shadow damage', dot: 'DoT damage' }
+      const PL: Record<string, string> = { ap: 'attack power', sta: 'Stamina', int: 'Intellect', spi: 'Spirit', all: 'all attributes', str: 'Strength', agi: 'Agility', armor: 'armor', dr: 'damage reduction', crit: 'critical strike', spellCrit: 'spell crit', dodge: 'dodge', haste: 'attack speed', dmg: 'damage', meleeDmg: 'physical damage', castRegen: 'in-combat mana regeneration', mp5: 'mana every 5 s', immune: 'invulnerability', allPct: 'all attributes', petDmg: 'pet damage', energy: 'Energy regeneration', resGen: 'Rage generation', lifesteal: 'healing from Shadow damage', sp: 'spell power', hit: 'hit', sweep: 'damage vs groups (second target)', retal: 'counterattack', cost: 'cost', shadow: 'Shadow damage', dot: 'DoT damage' }
       return `${val} ${PL[k] ?? k}`.trim()
     })
     if (fx.length) out.push(`Effect: ${fx.join(', ')}${a.dur && a.kind !== 'buff' ? ` for ${a.dur} s` : ''}`)

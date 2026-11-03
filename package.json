@@ -1,9 +1,9 @@
 {
   "name": "azeroth-idle",
   "productName": "Azeroth Idle",
-  "version": "0.9.14",
+  "version": "0.9.20",
   "private": true,
-  "description": "Idle RPG w klimacie WoW Classic, który siedzi na dole ekranu i gra się sam.",
+  "description": "An idle RPG that lives in a bar at the bottom of the screen and plays itself.",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "app": "vite build && electron .",
     "app:dev": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on tcp:5173 && cross-env DEV_URL=http://localhost:5173 electron .\"",
     "dist": "vite build && electron-builder --win portable --x64",
-    "balance": "tsx scripts/balance.ts 24"
+    "balance": "tsx scripts/balance.ts 24",
+    "test": "tsx scripts/t08.ts && tsx scripts/t08b.ts && tsx scripts/t08c.ts && tsx scripts/t09.ts && tsx scripts/t10-route.ts"
   },
   "dependencies": {
     "react": "^19.2.0",

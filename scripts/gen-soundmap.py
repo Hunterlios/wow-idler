@@ -1,9 +1,9 @@
-# Generuje src/audio/soundmap.ts: zdarzenia gry -> konkretne pliki z assets/sound (wg assets/lista-plikow.txt).
-#   python scripts/gen-soundmap.py assets/lista-plikow.txt abilities.json
+# Generuje src/audio/soundmap.ts: zdarzenia gry -> konkretne pliki z assets/sound (wg assets/file-list.txt).
+#   python scripts/gen-soundmap.py assets/file-list.txt abilities.json
 # Reguły to wzorce (regex) po ścieżkach w stylu oryginalnego klienta (sound/interface/..., sound/item/weapons/...).
 import json, re, sys, collections
 
-lst = sys.argv[1] if len(sys.argv) > 1 else 'assets/lista-plikow.txt'
+lst = sys.argv[1] if len(sys.argv) > 1 else 'assets/file-list.txt'
 abil = json.load(open(sys.argv[2] if len(sys.argv) > 2 else '/tmp/abil.json'))
 out_path = sys.argv[3] if len(sys.argv) > 3 else 'src/audio/soundmap.ts'
 S, sec = [], None
@@ -221,7 +221,7 @@ add('amb.ghost', r'^ambience/ghoststate\.ogg$'); add('amb.sea', r'^ambience/wate
 
 # ---------------------------------------------------------------- zapis
 keys = sorted(M)
-lines = ['// WYGENEROWANE przez scripts/gen-soundmap.py z assets/lista-plikow.txt — nie edytuj ręcznie.',
+lines = ['// WYGENEROWANE przez scripts/gen-soundmap.py z assets/file-list.txt — nie edytuj ręcznie.',
          '// Klucz zdarzenia -> pliki w assets/sound (ścieżki względne). Brak klucza = brak dźwięku.',
          'export const SOUNDS: Record<string, string[]> = {']
 for k in keys: lines.append(f'  {json.dumps(k)}: {json.dumps(M[k])},')

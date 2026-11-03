@@ -191,6 +191,17 @@ export function sellJunk(s: GameState) {
   s.hero.inv.forEach((it, i) => { if (it && it.rarity === 0) sum += sellAt(s, i) })
   return sum
 }
+// sprzedaż ekwipunku z toreb wybranej jakości (zbroja, broń, biżuteria; bez toreb, jedzenia, przedmiotów zadań)
+export const isGear = (it: { slot?: string; quest?: string; bagSize?: number } | null | undefined) => !!it && !!it.slot && !it.quest && !it.bagSize
+export function gearValue(s: GameState, q: number[]) {
+  return s.hero.inv.reduce((a, it) => a + (it && isGear(it) && q.includes(it.rarity) ? it.value * (it.count ?? 1) : 0), 0)
+}
+export function sellGear(s: GameState, q: number[]) {
+  if (s.where === 'field') return { n: 0, v: 0 }
+  let n = 0, v = 0
+  s.hero.inv.forEach((it, i) => { if (it && isGear(it) && q.includes(it.rarity)) { v += sellAt(s, i); n++ } })
+  return { n, v }
+}
 export function buyBag(s: GameState, size: number): string | null {
   const b = BAGS_FOR_SALE.find((x) => x.size === size)
   if (!b || s.where === 'field') return null

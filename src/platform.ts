@@ -6,6 +6,9 @@ export type NativeBridge = {
   quit: () => void
   setAutostart: (on: boolean) => void
   getAutostart: () => boolean
+  setOnTop?: (on: boolean) => void
+  getOnTop?: () => boolean
+  onOnTop?: (cb: () => void) => () => void
   getDisplays?: () => { id: number; label: string; current: boolean }[]
   setDisplay?: (id: number) => void
   dropAt?: (x: number, y: number) => void

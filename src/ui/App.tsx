@@ -251,7 +251,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — browser version (demo 0.9.14)</b>
+        <b>Azeroth Idle — browser version (demo 0.9.20)</b>
         <span>In the desktop app the background is transparent and the bar sits above the Windows taskbar.</span>
         <span>Hotkeys: C character · B bags · L quests · P spellbook · N talents · K skills · M map · Esc closes windows</span>
       </div>

@@ -1,4 +1,17 @@
-node_modules
-dist
-release
-assets
+# dependencies and build output
+node_modules/
+dist/
+release/
+
+# game graphics and sounds (not part of the repository)
+assets/
+assets-export/
+
+# generated browser build (shipped with releases)
+play-in-browser.html
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+*.log

@@ -1,4 +1,4 @@
-// WYGENEROWANE przez scripts/gen-soundmap.py z assets/lista-plikow.txt — nie edytuj ręcznie.
+// WYGENEROWANE przez scripts/gen-soundmap.py z assets/file-list.txt — nie edytuj ręcznie.
 // Klucz zdarzenia -> pliki w assets/sound (ścieżki względne). Brak klucza = brak dźwięku.
 export const SOUNDS: Record<string, string[]> = {
   "amb.air": ["ambience/zoneambience/amb_high_altitude_wind_loop_01.ogg"],

@@ -6,6 +6,17 @@ import { raceById, type Faction } from '../data/races'
 import type { GameState } from './types'
 
 export const routeZones = (s: GameState) => ROUTES[s.start].map((r) => r[0])
+// Dokąd iść po ukończeniu mapy: następna NIEUKOŃCZONA mapa z trasy. Gdy postać zboczyła z trasy (np. alians
+// z Dun Morogh poszedł sam do Elwynn), wraca na trasę: pierwsza nieukończona mapa, która nie jest już za niska.
+export function nextRouteZone(s: GameState, from: string): string | null {
+  const r = routeZones(s)
+  const done = (z: string) => (s.prog[z]?.cleared ?? 0) >= subsOf(z).length
+  const open = (z: string) => z !== from && !done(z)
+  const i = r.indexOf(from)
+  if (i >= 0) { const nx = r.slice(i + 1).find(open); if (nx) return nx }
+  const lvl = s.hero.level
+  return r.find((z) => open(z) && zoneById(z).max >= lvl) ?? r.find(open) ?? null
+}
 export const zoneOf = (s: GameState) => zoneById(s.loc.zone)
 export const subsOf = (zoneId: string) => subzonesOf(zoneId)
 export const subOf = (s: GameState): SubZone => subsOf(s.loc.zone)[s.loc.sub]
@@ -117,7 +128,7 @@ function walk(a: string, b: string) {
 const okFor = (f: Faction) => (t: Transport) => t.faction === 'neutral' || t.faction === f
 
 export type Waypoint = { zone: string; at: number } // wejście na mapę po `at` sekundach drogi
-export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; walkSecs: number; speed: number; blocked?: string; path: Waypoint[]; via: string[]; saved?: number }
+export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; walkSecs: number; speed: number; blocked?: string; path: Waypoint[]; via: string[]; saved?: number; steps?: { zone: string; secs: number; ride?: Transport }[] }
 // Statki / zeppeliny / tramwaj odjeżdżające z tej mapy
 // Port leży na konkretnej mapie (np. tramwaj w Ironforge na mapie Dun Morogh), a nie w obszarze startowym
 // (Coldridge Valley, Valley of Trials, Shadowglen...): stamtąd trzeba najpierw dojść.
@@ -191,5 +202,5 @@ export function planTrip(faction: Faction, from: string, to: string, speed = 0, 
     prevZ = st.zone
     path.push({ zone: st.zone, at: Math.round(t) })
   }
-  return { total: Math.round(t), kind, label: labels.join(' → '), walkSecs, speed, path, via: steps.slice(0, -1).map((x) => x.zone), saved: Math.round(saved) }
+  return { total: Math.round(t), kind, label: labels.join(' → '), walkSecs, speed, path, via: steps.slice(0, -1).map((x) => x.zone), saved: Math.round(saved), steps: steps.map((x) => ({ zone: x.zone, secs: x.e.secs, ride: x.e.t })) }
 }

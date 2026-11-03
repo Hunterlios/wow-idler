@@ -3,10 +3,11 @@
 import { classById, type School } from '../data/classes'
 import { raceById } from '../data/races'
 import type { Biome, MobType } from '../data/zones'
-import { currentZone, activePet, petDef, aliveOf as aliveOfMob, heroInMelee, throwOpener } from '../game/sim'
+import { currentZone, tripPosition, activePet, petDef, aliveOf as aliveOfMob, heroInMelee, throwOpener } from '../game/sim'
 import { styleOf, grants, active } from '../game/formulas'
 import { abilityIcon, racialIcon, stateIcon } from './icons'
 import { heroSprite, formSprite, weaponLook, LOOKS, type Anim, type CAnim, type FormAnim, type FormKind, type HeroKey, type OffKind, type WeaponKind, type Sprite } from './sprites'
+import { townSpot } from './townspot'
 import { mobSprite, npcSprite, petSprite, totemSprite, type NpcRole, type PetKind } from './mobsprites'
 import type { RaceId } from '../data/races'
 import { Vfx, spellLook, PAL, type ProjKind } from './vfx'
@@ -292,7 +293,8 @@ export class Scene {
     this.t += dt
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     ctx.imageSmoothingEnabled = false
-    const zone = currentZone(s)
+    // w marszu przez kilka map tło zmienia się na mapę, przez którą postać akurat idzie
+    const zone = s.phase === 'travel' && s.trip?.kind === 'walk' ? zoneById(tripPosition(s)?.cur.zone ?? s.loc.zone) : currentZone(s)
     // postać walcząca wręcz biegnie do nadchodzącego wroga
     // bieg naprzeciw wroga: postać rusza się sama (tło stoi)
     const charging = s.phase === 'fight' && !!s.mob && s.mob.dist > 0 && Math.abs(this.heroOffWant - this.heroOff) > 0.5
@@ -325,6 +327,7 @@ export class Scene {
       drawForeground(ctx, bo)
       return
     }
+    if (this.inTown) { this.inTown = false; this.heroOff = 0; this.heroOffWant = 0 } // wyjście z miasta: scena pola od nowa
     if (s.phase === 'travel' && s.trip && s.trip.kind === 'tram') {
       this.tram(s, dt)
       return
@@ -493,12 +496,14 @@ export class Scene {
         this.petX += dx
       }
       // kierunek patrzenia: w stronę ruchu; za grupą — na wroga (w lewo); w domu — przed siebie (w prawo)
+      // ruch względem ziemi: gdy kamera dogania postać (świat przesuwa się w lewo), pupil idzie razem z nią do przodu, a nie tyłem
+      const gdx = dx + this.groundV * dt
       if (backing) this.petFaceLeft = false
-      else if (Math.abs(dx) > 0.3) this.petFaceLeft = dx < 0
+      else if (Math.abs(gdx) > 0.3) this.petFaceLeft = gdx < 0
       else this.petFaceLeft = engage && !pet.tank
       const px = this.petX
       this.petPos = px
-      const running = Math.abs(dx) > (engage ? 0.2 : 2) && !backing
+      const running = Math.abs(gdx) > (engage ? 0.2 : 2) && !backing
       const walk = moving ? Math.sin(this.t * 10) : 0
       const kind: PetKind = s.hero.cls === 'hunter' ? 'beast' : pet.id === 'voidwalker' || pet.id === 'succubus' || pet.id === 'felhunter' ? pet.id : 'imp'
       const pa: CAnim = moving || running || backing ? 'walk' : this.petAtkT > 0 ? 'attack' : this.petHurtT > 0 ? 'hurt' : 'idle'
@@ -790,9 +795,10 @@ export class Scene {
 
 
   compX: number | null = null
+  inTown = false
   companion(s: GameState, gy: number, moving: boolean, dt: number) {
     const h = s.hero
-    if (h.comp !== 'mule' || !h.comps?.includes('mule') || h.mule || s.phase === 'dead' || s.phase === 'travel') { this.compX = null; return }
+    if (this.still || h.comp !== 'mule' || !h.comps?.includes('mule') || h.mule || s.phase === 'dead' || s.phase === 'travel') { this.compX = null; return }
     const q = this.px / 2
     const home = this.heroX - (activePet(h) ? 46 : 26) * q
     if (this.compX == null || !isFinite(this.compX)) this.compX = home
@@ -800,10 +806,11 @@ export class Scene {
     const d0 = home - this.compX
     const dx = Math.abs(d0) <= spd ? d0 : Math.sign(d0) * spd
     this.compX += dx
-    const walking = moving || Math.abs(dx) > 0.4
+    const gdx = dx + this.groundV * dt // względem ziemi (kamera dogania postać)
+    const walking = moving || Math.abs(gdx) > 0.4
     const sp = petSprite('mule', walking ? 'walk' : 'idle', walking ? Math.floor(this.t * 12) % 8 : Math.floor(this.t * 3) % 4)
     this.shadow(this.compX, gy, ((sp.right - sp.left) / 2.4) * this.sc)
-    this.blitFlip(sp, this.compX, gy, 1, dx < -0.4)
+    this.blitFlip(sp, this.compX, gy, 1, gdx < -0.4)
   }
 
   // Miasto / stolica: zabudowa, NPC (trener, kupiec, zleceniodawca), bohater odpoczywa
@@ -816,12 +823,24 @@ export class Scene {
     drawTown(this.ctx, bo, undead ? 'undercity' : horde ? 'horde' : 'alliance', capital)
     // NPC: zleceniodawca / trener klasy i kupiec, plus strażnik; ta sama grafika co postaci
     const r = s.hero.race
-    const npcs: [number, string, NpcRole, RaceId][] = capital
-      ? [[0.45, 'Trainer', 'trainer', r], [0.6, 'Vendor', 'vendor', horde ? 'orc' : 'dwarf'], [0.75, 'Stable', 'stable', horde ? 'tauren' : 'nightelf'], [0.9, '', 'guard', horde ? 'orc' : 'human']]
-      : [[0.45, 'Quests', 'quest', horde ? 'tauren' : 'human'], [0.62, 'Vendor', 'vendor', horde ? 'troll' : 'gnome'], [0.82, '', 'guard', horde ? 'orc' : 'human']]
-    for (const [fx, label, role, race] of npcs) {
+    const npcs: [number, string, NpcRole, RaceId, string][] = capital
+      ? [[0.42, 'Trainer', 'trainer', r, 'trainer'], [0.54, 'Weapons', 'trainer', horde ? 'orc' : 'dwarf', 'weapons'], [0.66, 'Vendor', 'vendor', horde ? 'orc' : 'dwarf', 'vendor'], [0.78, 'Stable', 'stable', horde ? 'tauren' : 'nightelf', 'stable'], [0.92, '', 'guard', horde ? 'orc' : 'human', '']]
+      : [[0.45, 'Quests', 'quest', horde ? 'tauren' : 'human', 'quests'], [0.62, 'Vendor', 'vendor', horde ? 'troll' : 'gnome', 'vendor'], [0.82, '', 'guard', horde ? 'orc' : 'human', '']]
+    // postać płynnie podchodzi do NPC z otwartej zakładki okna miasta (bez okna: stoi przy wejściu)
+    const tgt = npcs.find((n) => n[4] && n[4] === townSpot())
+    const wantX = tgt ? Math.round(this.w * tgt[0]) - 30 * this.sc : this.heroBaseX
+    if (!this.inTown) { this.inTown = true; this.heroOff = 0 }
+    const want = wantX - this.heroBaseX
+    const d = want - this.heroOff
+    const stp = Math.min(Math.abs(d), 150 * this.sc * dt)
+    this.heroOff += Math.sign(d) * stp
+    this.heroOffWant = this.heroOff
+    const townWalk = Math.abs(d) > 0.5
+    const townLeft = townWalk && d < 0
+    for (const [fx, label, role, race, tab] of npcs) {
       const x = Math.round(this.w * fx)
-      const sp = npcSprite(role, race, s.hero.cls, 'idle', Math.floor(this.t * 5 + fx * 10) % 8, true)
+      const npcCls = tab === 'weapons' ? 'warrior' : s.hero.cls
+      const sp = npcSprite(role, race, npcCls, 'idle', Math.floor(this.t * 5 + fx * 10) % 8, true)
       this.shadow(x, gy, ((sp.right - sp.left) / 2.4) * this.sc)
       const rr = this.blitS(sp, x, gy, 1)
       if (role === 'quest') this.text(s.quests.some((q) => q.have >= q.need && q.zone === s.loc.zone) ? '?' : '!', x, rr.top - 12, '#ffd100', 18, true)
@@ -830,8 +849,8 @@ export class Scene {
     // bohater stoi (obok niego towarzysz)
     const saved = s.phase
     s.phase = 'fight'
-    this.companion(s, gy, false, dt)
-    this.hero(s, gy, false, dt)
+    this.companion(s, gy, townWalk, dt)
+    this.hero(s, gy, townWalk, dt, townLeft)
     s.phase = saved
     this.text(capital ? `${raceById(s.hero.race).start.capital}` : townLabel(s), this.w / 2, 16, '#ffd100', 14, true)
   }
@@ -1094,7 +1113,7 @@ export class Scene {
     c.imageSmoothingEnabled = prev
     return { top: dy + sp.top * k, left: dx + sp.left * k, right: dx + sp.right * k, k }
   }
-  hero(s: GameState, gy: number, moving: boolean, dt: number) {
+  hero(s: GameState, gy: number, moving: boolean, dt: number, faceLeft = false) {
     const c = this.ctx
     const p = this.px / 2
     const h = s.hero
@@ -1158,7 +1177,7 @@ export class Scene {
       for (let i = 3; i >= 1; i--) { c.save(); c.globalAlpha = 0.18 * (4 - i); this.blitS(sp0, x - i * 10 * this.sc, gyH); c.restore() }
       anim = 'walk'; f = fr(16, 8)
     }
-    this.blitFlip(heroSprite(key, anim, f), x + (this.heroLunge > 0 && anim !== 'attack' ? 3 : 0), gyH, 1, retreating)
+    this.blitFlip(heroSprite(key, anim, f), x + (this.heroLunge > 0 && anim !== 'attack' ? 3 : 0), gyH, 1, retreating || faceLeft)
     c.restore()
     // rzucanie czaru: iskry w kolorze szkoły zbierają się w dłoni
     if (h.casting && !dead && !this.still) {

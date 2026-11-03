@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TALENTS, TALENT_COLS, talentPoints, spentIn, spentTotal, canLearnTalent, respecCost } from '../data/talents'
 import { learnTalent, resetTalents } from '../game/talents'
 import { talentInfo } from '../game/talentinfo'
@@ -16,7 +16,7 @@ import { LEFT_SLOTS, RIGHT_SLOTS, WEAPON_SLOTS, SLOT_PL, HEAL_DEFAULT, type Heal
 import { segmentsOf, equipFromInv, unequip, sortBags, BACKPACK, capacity, usedSlots, equipUpgrades } from '../game/inventory'
 import { rightClickInv, rightClickEquip, setVendorOpen, canSell, requestDestroy } from './itemActions'
 import { boardFor, capitalBoard, canTurnInHere, turnInPlace, acceptQuest, abandonQuest, questReady, questXp, MAX_QUESTS } from '../game/quests'
-import { trainerRows, train, trainAll, sellJunk, buyBag, turnIn, placeName, buyBack, buyFood, buyKit, restock, weaponRows, trainWeapon, travel, bindHearth, repairAll, repairAllCost, repairDiscount } from '../game/town'
+import { trainerRows, train, trainAll, sellJunk, sellGear, gearValue, buyBag, turnIn, placeName, buyBack, buyFood, buyKit, restock, weaponRows, trainWeapon, travel, bindHearth, repairAll, repairAllCost, repairDiscount } from '../game/town'
 import { TravelConfirm } from './MapPanel'
 import { BAGS_FOR_SALE, FOODS, KITS, canWear, makeFood, makeKit } from '../game/items'
 import { townOf, capitalOf, homeOf, progOf, subsOf } from '../game/world'
@@ -24,6 +24,7 @@ import { abilityIcon, itemIcon, menuIcon, talentIcon, racialIcon, passiveIcon, r
 import { Bar, Frame, Hover, ItemSlotBox, ItemTooltip, Money, Portrait, keepOnScreen, CompanionIcon } from './common'
 import { COMPANIONS, buyCompanion, owns, sellQ, QUALITY, QUALITY_COL, companionById } from '../game/companions'
 import { isOverlay, native } from '../platform'
+import { setTownSpot } from '../render/townspot'
 import { uiSound } from '../audio/gamesounds'
 import { soundSettings, setSoundSettings, onSoundSettings, type SoundSettings } from '../audio/sound'
 // Doświadczenie z ikoną XP (jak w nagrodach zadań w grze); bez pliku: sam tekst
@@ -57,17 +58,21 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
   const tip = statTips(h, d)
   const broken = Object.values(h.equip).filter((it) => it?.dur === 0).length
   const [ctab, setCtab] = useState<'char' | 'pets'>('char')
+  const charBody = useRef<HTMLDivElement>(null)
+  const [charH, setCharH] = useState(0)
+  useEffect(() => { if (ctab === 'char' && charBody.current) setCharH(charBody.current.offsetHeight) })
   const equipBest = () => { const n = equipUpgrades(h); toast(n ? `Equipped ${n} better item${n > 1 ? 's' : ''} from your bags.` : 'Nothing better in your bags.', n ? '#1eff00' : '#aaaaaa'); bump() }
   if (ctab === 'pets') return (
     <Frame id="char" title={h.name} onClose={onClose} className="char-frame" icon={raceIcon(h.race) ?? menuIcon('char')}>
       <div className="tabs"><button className="tab" onClick={() => setCtab('char')}>Character</button><button className="tab on">Mounts &amp; Pets</button></div>
-      <CompanionsTab s={s} bump={bump} />
+      <div className="char-body" style={{ height: charH || undefined }}><CompanionsTab s={s} bump={bump} /></div>
     </Frame>
   )
   return (
     <Frame id="char" title={h.name} onClose={onClose} className="char-frame" icon={raceIcon(h.race) ?? menuIcon('char')}>
       <div className="tabs"><button className="tab on">Character</button><button className="tab" onClick={() => setCtab('pets')}>Mounts &amp; Pets</button>
         <button className="wbtn small right" title="Puts on the best items for your class from your bags" onClick={equipBest}>⚔ Equip best gear</button></div>
+      <div className="char-body" ref={charBody}>
       <div className="char-sub">Level {h.level} {r.name} <span style={{ color: c.color }}>{c.name}</span>{h.cls === 'druid' && h.form !== 'caster' ? ` · ${h.form === 'bear' ? 'Bear Form' : h.form === 'cat' ? 'Cat Form' : 'Moonkin Form'}` : ''}{h.wellFed ? <span className="wellfed"> · Well Fed ({Math.ceil(h.wellFed.left / 60)} min)</span> : null}</div>
       <div className="paperdoll">
         <div className="pd-col">{LEFT_SLOTS.map(slot)}</div>
@@ -113,6 +118,7 @@ export function CharacterPanel({ s, onClose, bump, toast }: { s: GameState; onCl
         </div>
       </div>
       {broken > 0 && <div className="broken-warn">Broken items: {broken}. They give no bonuses; repair them at a vendor or with a repair kit.</div>}
+      </div>
     </Frame>
   )
 }
@@ -235,6 +241,13 @@ function statTips(h: GameState['hero'], d: ReturnType<typeof stats>): Record<str
   }
 }
 
+// „Stack”: torby przy prawej krawędzi paska gry (domyślnie stoją przy prawej krawędzi ekranu)
+function gameRightOffset() {
+  const st = document.querySelector('.strip')
+  if (!st) return { dx: 0, dy: 0 }
+  const gap = Math.max(0, window.innerWidth - st.getBoundingClientRect().right)
+  return { dx: -gap / uiScale(), dy: 0 }
+}
 // ---------------------------------------------------------------- Torby
 export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: () => void } & Act) {
   const h = s.hero
@@ -321,7 +334,7 @@ export function BagsPanel({ s, onClose, bump, toast }: { s: GameState; onClose: 
           <img src={itemIcon(i === 0 ? { id: -1, name: 'Backpack', rarity: 1, ilvl: 1, value: 0, bagSize: 16 } : h.bags[i - 1]!)} alt="" draggable={false} /><span>{name}</span>
           {i === 0 && <button className="wbtn small" title="Sort bags" onClick={() => { sortBags(h); bump() }}>Sort</button>}
           {i === 0 && <button className="wbtn small" title="Combine all bags into one big window" onClick={() => setM(true)}>Combine</button>}
-          {i === 0 && <button className="wbtn small" title="Stack all bags back at the right edge" onClick={() => { const z = { dx: 0, dy: 0 }; const n = Object.fromEntries([0, 1, 2, 3, 4].map((k) => [key(k), z])); setOffs(n); const fr = { ...layout().frames }; for (const k of Object.keys(n)) fr[k] = z; saveLayout({ frames: fr }) }}>Stack</button>}
+          {i === 0 && <button className="wbtn small" title="Stack all bags back at the right edge" onClick={() => { const z = gameRightOffset(); const n = Object.fromEntries([0, 1, 2, 3, 4].map((k) => [key(k), z])); setOffs(n); const fr = { ...layout().frames }; for (const k of Object.keys(n)) fr[k] = z; saveLayout({ frames: fr }) }}>Stack</button>}
           {i === 0 && <button className="wclose" onClick={onClose}>✕</button>}
         </div>
         <div className="bagwin-grid">
@@ -401,6 +414,7 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
   const capital = s.where === 'capital'
   type Tab = 'quests' | 'trainer' | 'vendor' | 'weapons' | 'stable'
   const [tab, setTab] = useState<Tab>('quests')
+  useEffect(() => { setTownSpot(tab); return () => setTownSpot('') }, [tab])
   const tabs: [Tab, string][] = capital ? [['quests', 'Quests'], ['trainer', 'Trainer'], ['vendor', 'Vendor'], ['weapons', 'Weapon Master'], ['stable', 'Stable']] : [['quests', 'Quests'], ['vendor', 'Vendor']]
   return (
     <Frame id="city" title={placeName(s)} onClose={onLeave} className="city-frame" icon={menuIcon(capital ? 'capital' : 'town')}>
@@ -408,11 +422,13 @@ export function CityPanel({ s, onLeave, bump, toast }: { s: GameState; onLeave: 
         {tabs.map(([k, l]) => <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}
         <button className="wbtn right" onClick={onLeave}>Leave town</button>
       </div>
+      <div className="city-body">
       {tab === 'quests' && <QuestBoard s={s} bump={bump} toast={toast} />}
       {tab === 'trainer' && <Trainer s={s} bump={bump} toast={toast} />}
       {tab === 'vendor' && <Vendor s={s} bump={bump} toast={toast} />}
       {tab === 'weapons' && <WeaponMaster s={s} bump={bump} toast={toast} />}
       {tab === 'stable' && <Stable s={s} bump={bump} toast={toast} />}
+      </div>
       {!capital && <div className="dim small">Trainers and Weapon Masters are in your faction's capital cities.</div>}
       {capital && (
         <div className="hearth-row">
@@ -512,6 +528,8 @@ function Vendor({ s, bump, toast }: { s: GameState } & Act) {
   })
   const buy = (name: string, n: number) => { const e = buyFood(s, name, n); if (e) toast(e, '#ff4040'); else uiSound('ui.coins', 80); bump() }
   const repairCost = repairAllCost(s)
+  const [gearQ, setGearQ] = useState<number[]>([1])
+  const gearV = gearValue(s, gearQ)
   useEffect(() => { setVendorOpen(true); return () => setVendorOpen(false) }, [])
   return (
     <div className="parchment vendor" data-drop="vendor">
@@ -523,6 +541,13 @@ function Vendor({ s, bump, toast }: { s: GameState } & Act) {
         <Hover tip={<div className="tooltip-body"><div className="tt-name">Repair</div><div>Restores full durability of equipped items and items in your bags.</div>{repairDiscount(s) > 0 && <div className="tt-dim">Racial discount: {Math.round(repairDiscount(s) * 100)}%.</div>}</div>}>
           <button className="wbtn" disabled={!repairCost || h.copper < repairCost} onClick={() => { const e = repairAll(s); if (!e) { uiSound('ui.repair'); uiSound('ui.coins', 80) } toast(e ?? 'Gear repaired', e ? '#ff4040' : '#fff'); bump() }}>🔨 Repair all {repairCost ? <Money copper={repairCost} /> : '(nothing to repair)'}</button>
         </Hover>
+      </div>
+      <div className="vend-gear">
+        <span className="vg-label">Sell gear from bags:</span>
+        {[1, 2, 3, 4].map((i) => (
+          <label key={i} style={{ color: ['#9d9d9d', '#3a3a3a', '#0a7a00', '#0050b0', '#7a1ab0'][i] }}><input type="checkbox" checked={gearQ.includes(i)} onChange={(e) => setGearQ(e.target.checked ? [...gearQ, i] : gearQ.filter((x) => x !== i))} /> {QUALITY[i]}</label>
+        ))}
+        <button className="wbtn" disabled={!gearV} onClick={() => { const r = sellGear(s, gearQ); uiSound('ui.coins', 80); toast(`Sold ${r.n} item${r.n === 1 ? '' : 's'} for ${(r.v / 100).toFixed(2)} s`, '#fff'); bump() }}>Sell (<Money copper={gearV} />)</button>
       </div>
       <div className="tabs small">
         {([['goods', 'Goods'], ['bags', 'Bags'], ['buyback', `Buyback (${s.buyback.length})`]] as const).map(([k, l]) => <button key={k} className={`tab ${sub === k ? 'on' : ''}`} onClick={() => setSub(k)}>{l}</button>)}
@@ -641,7 +666,7 @@ export function Spellbook({ s, onClose, bump }: { s: GameState; onClose: () => v
     return (
       <Frame id="spells" title="Spellbook" onClose={onClose} className="spell-frame" icon={menuIcon('spell')}>
         {tabsRow}
-        <div className="parchment spells">
+        <div className="parchment spells rot">
           <div className="rot-head">
             <span className="pdim">{h.prio?.length ? 'Custom order: from the top, your character uses the first ability that is ready (cooldown, resource, range and its own conditions such as Execute below 20% still apply).' : 'Automatic order (default). Move an ability up or down to set your own order, like a cast macro.'}</span>
             {h.prio?.length ? <button className="wbtn small" onClick={() => { h.prio = undefined; bump() }}>Reset to automatic</button> : null}
@@ -855,6 +880,8 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
   const [txt, setTxt] = useState('')
   const [msg, setMsg] = useState('')
   const [auto, setAuto] = useState(() => native?.getAutostart() ?? false)
+  const [onTop, setOnTopS] = useState(() => native?.getOnTop?.() ?? true)
+  useEffect(() => native?.onOnTop?.(() => setOnTopS(native?.getOnTop?.() ?? true)), [])
   const [pw, setPw] = useState('')
   const [lvlIn, setLvlIn] = useState(String(s.hero.level))
   const [displays, setDisplays] = useState(() => native?.getDisplays?.() ?? [])
@@ -909,6 +936,7 @@ export function Settings({ s, onClose, onReset, onImport, bump }: { s: GameState
         </div>
         <div className="dim small">Move the bar with the ⠿ grip on the left; move windows by their title (double-click resets the position).</div>
         <label className="set-row"><input type="checkbox" checked={s.autoAdvance} onChange={(e) => { s.autoAdvance = e.target.checked; bump() }} /> Automatically move on to the next subzone / zone after a boss</label>
+        {isOverlay && native?.setOnTop && <label className="set-row"><input type="checkbox" checked={onTop} onChange={(e) => { native!.setOnTop!(e.target.checked); setOnTopS(e.target.checked) }} /> Always on top (the bar stays above other windows)</label>}
         {isOverlay && <label className="set-row"><input type="checkbox" checked={auto} onChange={(e) => { native!.setAutostart(e.target.checked); setAuto(e.target.checked) }} /> Start with Windows</label>}
         <div className="set-row col">
           <span>Save backup (text):</span>

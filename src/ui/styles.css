@@ -641,3 +641,41 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .comp-sec { color: var(--gold-hi, #ffd100); font: bold 12px var(--title); margin-top: 4px; border-bottom: 1px solid #4a3c22; padding-bottom: 2px; }
 .comp-row .pdim { color: #b8ac90; }
 .rot-head { grid-column: 1 / -1; }
+
+/* 0.9.15: okna mają ten sam rozmiar na każdej zakładce */
+.spell-frame .spells { height: 440px; max-height: 62vh; overflow: auto; align-content: start; }
+.spells.rot { display: flex; flex-direction: column; gap: 3px; }
+.spells.rot .rot-row { display: flex; align-items: center; gap: 8px; }
+.rot-row .rot-n { flex: none; width: 26px; height: 22px; line-height: 22px; text-align: center; border-radius: 3px; background: linear-gradient(#5a1a0a, #2a0804); color: #ffe080; font: bold 13px var(--title); box-shadow: 0 0 0 1px #000, inset 0 0 0 1px #8a6a2a; text-shadow: 0 1px 1px #000; }
+.char-body { display: flex; flex-direction: column; overflow: auto; }
+
+
+/* 0.9.15: paski przewijania w stylu gry (kamień + złoto; na pergaminie brąz) */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: linear-gradient(90deg, #0a0806, #1c150d 50%, #0a0806); border-left: 1px solid #000; box-shadow: inset 0 0 0 1px #3a2c16; border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(90deg, #6a4a1a, #d4a838 45%, #8a6424); background-clip: padding-box; border: 3px solid transparent; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(90deg, #8a6424, #ffd860 45%, #a8802c); }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-corner { background: transparent; }
+.parchment::-webkit-scrollbar-track, .parchment *::-webkit-scrollbar-track { background: linear-gradient(90deg, #b89a62, #d8c08a 50%, #b89a62); box-shadow: inset 0 0 0 1px #8a6a3a; }
+.parchment::-webkit-scrollbar-thumb, .parchment *::-webkit-scrollbar-thumb { background: linear-gradient(90deg, #5a2a0a, #9a5a1a 45%, #6a3410); background-clip: padding-box; border-color: transparent; }
+.spells.rot .rot-row .sp-main { flex: 1; min-width: 0; }
+.spells.rot .rot-row { padding: 2px 4px; }
+.spells.rot .rot-row .rot-n { align-self: center; }
+/* pola wyboru w kolorach gry zamiast niebieskich systemowych */
+input[type=checkbox], input[type=radio], input[type=range] { accent-color: #c8a24a; }
+.parchment input[type=checkbox], .parchment input[type=radio] { accent-color: #8a2a10; }
+.spells.rot { align-items: stretch; }
+
+/* 0.9.15: okno miasta ma stałą wielkość na każdej zakładce */
+.city-body { height: 480px; max-height: 62vh; display: flex; flex-direction: column; min-height: 0; }
+.city-body > * { flex: 1 1 auto; min-height: 0; max-height: none !important; overflow: auto; }
+/* 0.9.17: znaczniki liczby przedmiotów przy slotach nie są ucinane */
+.char-body { overflow: visible; }
+.char-body > .comp-tab { overflow: auto; flex: 1; min-height: 0; }
+
+/* 0.9.17: sprzedaż ekwipunku wybranej jakości */
+.vend-gear { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: -4px 0 10px; font-size: 12px; }
+.vend-gear .vg-label { font-weight: bold; color: #3a1a00; }
+.vend-gear label { display: flex; align-items: center; gap: 3px; font-weight: bold; }
+.vend-gear .wbtn { margin-left: auto; }

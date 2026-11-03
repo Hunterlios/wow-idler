@@ -175,6 +175,9 @@ export const ITEM_ICONS: Record<string, string[]> = {
   'Curiously Tasty Omelet': ['inv_misc_food_13', 'inv_egg_03'], 'Grilled Squid': ['inv_misc_fish_13', 'inv_misc_fish_19'],
   'Nightfin Soup': ['inv_drink_17', 'inv_misc_food_64'], 'Monster Omelet': ['inv_misc_food_06', 'inv_misc_food_51', 'inv_egg_03'],
   'Runn Tum Tuber Surprise': ['inv_misc_food_63', 'inv_misc_food_25'], 'Smoked Desert Dumplings': ['inv_misc_food_64', 'inv_misc_food_pinenut'],
+  'Goretusk Liver Pie': ['inv_misc_food_10', 'inv_misc_food_14'], 'Smoked Sagefish': ['inv_misc_fish_20', 'inv_misc_fish_13'],
+  'Sagefish Delight': ['inv_misc_fish_21', 'inv_misc_fish_20', 'inv_misc_fish_13'], 'Cooked Glossy Mightfish': ['inv_misc_fish_15', 'inv_misc_fish_13'],
+  'Blessed Sunfruit': ['inv_misc_food_41', 'inv_misc_food_19'], 'Blessed Sunfruit Juice': ['inv_drink_16', 'inv_drink_09'],
   "Dirge's Kickin' Chimaerok Chops": ['inv_misc_food_65', 'inv_misc_food_46', 'inv_misc_food_69'],
   // zestawy naprawcze
   'Light Repair Kit': ['inv_misc_armorkit_17', 'inv_misc_armorkit_30'], 'Medium Repair Kit': ['inv_misc_armorkit_16', 'inv_misc_armorkit_30'],

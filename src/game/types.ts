@@ -199,7 +199,7 @@ export type LogLine = { time: number; text: string; color?: string }
 
 export type Totals = { kills: number; deaths: number; copper: number; xp: number; items: number; quests: number; played: number; bosses: number }
 
-export type Trip = { kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number }; path?: { zone: string; at: number }[]; origin?: { zone: string; sub: number }; back?: boolean }
+export type Trip = { kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; total: number; from?: string; to?: string; form?: string; dest?: { zone: string; sub: number }; path?: { zone: string; at: number }[]; origin?: { zone: string; sub: number }; back?: boolean; final?: { zone: string; sub: number }; port?: boolean }
 
 export type GameState = {
   v: 4
@@ -214,6 +214,7 @@ export type GameState = {
   autoAdvance: boolean
   autoEquip: boolean
   trip: Trip | null
+  atPort?: string // mapa, na której postać stoi w porcie (przy tramwaju / statku / zeppelinie) i może od razu wsiąść
   phase: Phase
   phaseT: number
   mob: MobState | null

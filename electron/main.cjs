@@ -14,6 +14,17 @@ function readCfg() { try { return JSON.parse(fs.readFileSync(CFG(), 'utf8')) } c
 function writeCfg(c) { try { fs.writeFileSync(CFG(), JSON.stringify(c)) } catch { /* nic */ } }
 
 const DIST = path.join(__dirname, '..', 'dist')
+// zawsze na wierzchu (ustawienie gracza, domyślnie włączone)
+const onTop = () => readCfg().onTop !== false
+function applyTop() {
+  if (!win || win.isDestroyed()) return
+  if (onTop()) win.setAlwaysOnTop(true, 'screen-saver')
+  else win.setAlwaysOnTop(false)
+}
+function setOnTop(on) {
+  writeCfg({ ...readCfg(), onTop: !!on })
+  applyTop()
+}
 let win = null
 let tray = null
 
@@ -43,7 +54,7 @@ function createWindow() {
     x: wa.x, y: wa.y, width: wa.width, height: wa.height,
     frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, thickFrame: false,
     resizable: false, movable: false, minimizable: true, maximizable: false, fullscreenable: false,
-    alwaysOnTop: true, skipTaskbar: false, show: false, title: 'Azeroth Idle',
+    alwaysOnTop: onTop(), skipTaskbar: false, show: false, title: 'Azeroth Idle',
     icon: path.join(DIST, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -53,13 +64,13 @@ function createWindow() {
       autoplayPolicy: 'no-user-gesture-required', // dźwięki gry bez wcześniejszego kliknięcia
     },
   })
-  win.setAlwaysOnTop(true, 'screen-saver')
+  applyTop()
   win.setIgnoreMouseEvents(true, { forward: true }) // przezroczyste, dopóki kursor nie trafi w pasek
   if (process.env.DEV_URL) win.loadURL(process.env.DEV_URL)
   else win.loadFile(path.join(DIST, 'index.html'))
   win.once('ready-to-show', () => win.showInactive())
   // po utracie fokusu niektóre okna (np. pełnoekranowe) potrafią zepchnąć nakładkę niżej
-  win.on('blur', () => { if (win && win.isVisible()) win.setAlwaysOnTop(true, 'screen-saver') })
+  win.on('blur', () => { if (win && win.isVisible() && onTop()) win.setAlwaysOnTop(true, 'screen-saver') })
   win.on('closed', () => { win = null })
 }
 
@@ -71,7 +82,7 @@ function showWin() {
   if (!win) return createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
-  win.setAlwaysOnTop(true, 'screen-saver')
+  applyTop()
 }
 
 function createTray() {
@@ -81,6 +92,7 @@ function createTray() {
   const menu = () => Menu.buildFromTemplate([
     { label: win && win.isVisible() ? 'Hide bar' : 'Show bar', click: () => (win && win.isVisible() ? win.hide() : showWin()) },
     { label: 'Bring bar and windows back on screen', click: () => { showWin(); win && win.webContents.send('ui:reset') } },
+    { type: 'checkbox', label: 'Always on top', checked: onTop(), click: (i) => { setOnTop(i.checked); win && win.webContents.send('app:ontop-changed') } },
     { type: 'checkbox', label: 'Start with Windows', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked }) },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
@@ -128,6 +140,8 @@ ipcMain.on('app:assets', (e) => {
   const soundDir = ['sound', 'sounds'].find((d) => fs.existsSync(path.join(dir, d))) ?? null
   e.returnValue = { base: pathToFileURL(dir).href + '/', icons: list('icons'), graphics: list('graphics'), cursor: cursorFrom(dir), soundDir }
 })
+ipcMain.on('app:ontop', (_e, on) => setOnTop(on))
+ipcMain.on('app:ontop:get', (e) => { e.returnValue = onTop() })
 ipcMain.on('app:autostart', (_e, on) => app.setLoginItemSettings({ openAtLogin: !!on }))
 ipcMain.on('app:autostart:get', (e) => { e.returnValue = app.getLoginItemSettings().openAtLogin })
 
