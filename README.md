@@ -211,6 +211,71 @@ Wszystkie grafiki (ikony, ramki, sceneria) są rysowane w kodzie, w stylu Classi
 - Usunięte automatyczne rozdawanie talentów. Wróciło automatyczne zakładanie lepszego ekwipunku (ustawienie, domyślnie włączone).
 - Tryb testowy: ręczne ustawianie poziomu postaci.
 
+### Nowe w 0.9.10
+- **Ekwipunek ma znaczenie:**
+  - przedmioty dają ok. 1,8× więcej statystyk i mocy czarów (stare przedmioty w zapisie są przeskalowane);
+  - walka bez broni to pięści;
+  - czary i pupile słabną, gdy postać nie ma ekwipunku na swój poziom (`gearScore`);
+  - wrogowie są mocniejsi (+15% zdrowia, +35% obrażeń), bo zakładają postać w ekwipunku.
+
+  Postać bez ekwipunku ma teraz trudno, a w ekwipunku rozwija się prawie tak szybko jak wcześniej. Test: `npx tsx scripts/gearcheck.ts 4`.
+- **Charge i Feral Charge** naprawdę doskakują do wroga (szybki doskok ze smugą), a ogłuszenie działa dopiero przy kontakcie.
+- **Efekty umiejętności dystansowych przejrzane dla wszystkich klas:**
+  - Judgement: młot światła spadający z nieba;
+  - Hammer of Justice i Hammer of Wrath: rzucany młot;
+  - novy wokół postaci (Frost Nova, Hellfire, Holy Nova, Arcane Explosion, Blast Wave);
+  - kanały (Drain Life/Soul, Mind Flay, Siphon Life) i stożek Cone of Cold;
+  - deszcz strzał Volley, Multi-Shot w każdego z grupy, kolorowe strzały (Arcane Shot, stingi);
+  - okrzyki (Intimidating Shout, Psychic Scream), rój Insect Swarm, czaszka Fear / Death Coil;
+  - pułapki, Polymorph, większe kule Pyroblast / Soul Fire / Lava Burst;
+  - efekty DoT-ów i klątw przy rzuceniu.
+- **Pupile:** Imp rzuca kule ognia, Succubus ma własny model (lawendowa skóra, rogi, skrzydła, ogon, kopyta, bicz) i smaga wroga, a Felhunter ma własny model demona-ogara.
+- **Niszczenie przedmiotów:** przeciągnij przedmiot z torby lub z ekwipunku poza okna albo kliknij go Shift + prawym przyciskiem; potem potwierdź.
+
+### Nowe w 0.9.11
+- **Talenty:** tooltip pokazuje dokładny efekt, liczony z tego, co talent naprawdę robi: „każdy rang”, „teraz”, „następny rang” i wartość przy maksimum. Przykład: Redoubt daje +1% uniku na rang, czyli +5% przy 5/5.
+  - Audyt wszystkich drzewek: każdy klucz efektu jest używany przez grę, a talenty z wieloma rangami skalują się z każdym punktem.
+  - Poprawki: talenty obniżające koszt działają też na wściekłość i energię, a talenty wzmacniające buffy (np. Elemental Weapons dla Rockbiter) wzmacniają też sam buff.
+- **Broń na postaci:** wygląd broni zależy od przedmiotu. Kolor metalu zależy od poziomu przedmiotu, poświata od jakości (zielona, niebieska, fioletowa), a druga broń w ręce pokazuje swój typ. Zmiana broni jest widoczna w oknie postaci i na pasku.
+- **Pasek gry ma stałą szerokość, najwyżej 1200 px.** Ustawienie szerokości zostało usunięte, a pasek nadal można przesuwać.
+- **Płynny ruch:**
+  - po walce postać nie cofa się na lewo, tylko idzie dalej, a obraz ją doganiał;
+  - kolejna walka zaczyna się tam, gdzie postać stoi, więc wróg nie „dobiega” do pustego miejsca;
+  - wróg dystansowy najpierw wchodzi w pole widzenia, a postać walcząca wręcz biegnie do niego.
+- **Tryb testowy:** dodawanie złota (+1 / +10 / +100 / +1000 g).
+
+### Nowe w 0.9.12
+- **Pupile i przywołańce w walce:**
+  - pupil wręcz (Succubus, Felhunter, bestia łowcy) biegnie do wroga, a gdy wróg dalej idzie w stronę postaci, pupil płynnie się cofa twarzą do niego, w jego tempie (animacja cofania), zamiast być przepychanym;
+  - pupil-tank cofa się tylko do chwili, aż zatrzyma wroga, i tam zostaje.
+- **Animacje śmierci mobów przejrzane dla wszystkich 211 mobów** (arkusz z ostatnią klatką śmierci):
+  - centaury (Magram, Gelkis, Galak, Kolkar), raptory i strusie (Plainstrider) już nie przewracają się na głowę i nie wiszą w powietrzu, tylko nogi się uginają i ciało osuwa się na ziemię;
+  - humanoidy i duże dwunożne (ogry, yeti, golemy, Harvest Watcher) nie mają już ręki sterczącej do góry po upadku.
+
+### Nowe w 0.9.13
+- **Pupile:**
+  - pupile DPS walczące wręcz (Succubus, Felhunter) wchodzą za grupę wrogów i gonią ją od tyłu;
+  - pupile zawsze patrzą w stronę, w którą idą, a po powrocie do postaci znów patrzą przed siebie;
+  - tank stoi przed wrogiem i patrzy na niego.
+- **Charge / Feral Charge:** postać czeka ok. 1 s, aż wróg wejdzie w pole widzenia, i dopiero wtedy szarżuje.
+- **Shadowmeld** działa też wtedy, gdy jeden cios zbiłby zdrowie z ponad 10% do zera (zostaje 1 HP).
+- **Bez broni** postać walczy gołymi rękami i tak też wygląda, także caster. Rzucanie czarów bez broni jest możliwe jak w grze, ale słabsze przez karę za brak ekwipunku.
+- **Paladyn** walczy wręcz: Judgement i inne natychmiastowe czary rzuca po drodze albo w zwarciu (styl „Caster” zostawia go z daleka).
+- **Kontrola tłumu u postaci dystansowych:**
+  - Frost Nova, Entangling Roots i strach są rzucane, gdy wróg dojdzie do zwarcia; potem postać płynnie odbiega (odwrócona, biegiem) i rzuca dalej;
+  - Escape Artist (gnom) też daje płynne odbiegnięcie zamiast teleportu.
+- **Zamrożenie i ogłuszenie przerywają wszystkie akcje wroga,** także strzały i czary wrogów dystansowych.
+- **Wrogowie dystansowi** (np. Witherbark Axe Thrower), którzy stanęli i strzelają, mają animację postoju i ataku, a nie chodzenia.
+- **Boss:** po porażce wraca zawsze po 5 minutach. Po trzech porażkach z rzędu postać czeka z nim do następnego poziomu (albo przycisk „⚔ Challenge now” na pasku).
+- **Punkty kombinacji** są pokazywane przy pasku zdrowia celu i znikają po walce.
+- **Okno postaci:**
+  - postać stoi spokojnie (idle) i nie powtarza akcji z walki;
+  - nowa linia Hit: szansa trafienia bronią i czarami, z opisem w tooltipie.
+- **Odpoczynek:** postać trzyma w ręce jedzenie albo picie, a po wstaniu znowu broń.
+- **Torby:** przycisk „Combine” łączy wszystkie torby w jedno duże okno, a „Split” je rozdziela.
+- **Ikony:** złote koło zębate z gry jako ikona ustawień (`trade_engineering`), minus „schowaj do zasobnika” na środku.
+- **Spellbook:** opisy mają do dwóch linii, a pełny opis jest w tooltipie (także dla umiejętności rasowych).
+
 ## Struktura
 
 ```
@@ -219,7 +284,7 @@ src/game/      czysta logika (bez DOM): sim.ts, world.ts, quests.ts, town.ts, in
 src/render/    scene.ts (scena + miasta), icons.ts (ikony przedmiotów i umiejętności)
 src/ui/        React: tworzenie postaci, pasek, panele, mapa, dnd.tsx (przeciąganie), itemActions.ts
 electron/      main.cjs (okno-nakładka, tray, autostart), preload.cjs
-scripts/       balance.ts, overlevel.ts (walka w strefach wyższych o kilka poziomów)
+scripts/       balance.ts, overlevel.ts (walka w strefach wyższych o kilka poziomów), gearcheck.ts (z ekwipunkiem i bez)
 ```
 
 Najważniejsza zasada: `src/game` nie wie nic o DOM-ie. Funkcja `advance(state, sekundy)` napędza grę na żywo, progres offline i test balansu.
@@ -227,3 +292,22 @@ Najważniejsza zasada: `src/game` nie wie nic o DOM-ie. Funkcja `advance(state, 
 ## Uwaga o prawach
 
 Nazwy ras, klas, stref i mobów należą do Blizzard Entertainment. Projekt jest prywatny i fanowski, tak jak Tallgrass. Grafika jest w całości proceduralna i nie używa żadnych assetów Blizzarda. Przed publicznym wydaniem wystarczy podmienić nazwy w `src/data/`.
+
+### Nowe w 0.9.14
+- **Kontrola tłumu:**
+  - po zamrożeniu / ogłuszeniu wroga i odskoku postaci wróg stoi w miejscu, a po zejściu efektu podchodzi do postaci, zamiast bić z miejsca, gdzie go zamrożono;
+  - opisy umiejętności (Frost Nova, Entangling Roots, Fear, Polymorph, Hammer of Justice, Wing Clip...) mówią dokładnie, co się dzieje: czy wróg może się ruszać, atakować, rzucać czary, ile to trwa i co dzieje się potem.
+- **Czary kanałowane** (Rain of Fire, Blizzard, Hurricane, Hellfire, Volley, Drain Life, Arcane Missiles, Mind Flay, Tranquility, Evocation) działają co sekundę, a nie dopiero po końcu kanału.
+- **Rogue:**
+  - zaczyna z bronią miotaną (Small Throwing Knife), jak w Classicu;
+  - z bronią miotaną / łukiem / strzelbą otwiera walkę rzutem (Throw / Shoot), czeka, aż wróg podejdzie, i walczy wręcz (wojownik tak samo).
+- **Wymagana broń:** bez broni nieaktywne są ciosy z dopiskiem „Requires Melee Weapon” w Classicu (Sinister Strike, Eviscerate, Heroic Strike, Raptor Strike...), Backstab i Ambush wymagają sztyletu, a nasycenia broni szamana wymagają broni. W księdze widać czerwony dopisek.
+- **Nie da się wejść do miasta ani stolicy w trakcie walki.**
+- **Znane ścieżki:** każda wyczyszczona podstrefa skraca marsz przez tę mapę (do −60% przy całej mapie), także po drodze do celu.
+- **Muł kupiecki (Pack Mule, 50 g)** u nowego NPC **Stable** w stolicy:
+  - w oknie postaci zakładka **Mounts & Pets**: wybór towarzysza i jakości przedmiotów do sprzedania;
+  - gdy torby są pełne, muł zanosi przedmioty do kupca i po ok. 2 min wraca z pieniędzmi;
+  - chodzi obok postaci (nie walczy), a gdy jest w drodze, go nie widać.
+- **Księga: zakładka Rotation** — własna kolejność umiejętności (jak makro), z przyciskami ▲/▼ i powrotem do automatu.
+- **Pasek akcji** mieści wszystkie umiejętności (z talentami) i nie wchodzi pod menu: przyciski zmniejszają się, a przy bardzo wielu idą w dwa rzędy.
+- **Okno postaci:** przycisk **Equip best gear** zamiast opcji automatycznego zakładania; portret bez paska rzucania.

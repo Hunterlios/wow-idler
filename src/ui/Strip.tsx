@@ -4,7 +4,7 @@ import { raceById, RACIAL_ACTIVE } from '../data/races'
 import { zoneById } from '../data/zones'
 import { talentPoints, spentTotal } from '../data/talents'
 import { xpToNext, MAX_LEVEL, grants, active, knows, styleOf } from '../game/formulas'
-import { stats, activePet, petDef, petMaxHp, canTurnBack, tripPosition, turnBack, bossState, costOf, cdOf, learnableCount, abilityInfo, autoAttacking, SPIRIT_DUR, heroInMelee, swingSpeed } from '../game/sim'
+import { challengeBoss, stats, activePet, petDef, petMaxHp, canTurnBack, tripPosition, turnBack, bossState, costOf, cdOf, learnableCount, abilityInfo, autoAttacking, SPIRIT_DUR, heroInMelee, swingSpeed } from '../game/sim'
 import { subOf, subsOf, townOf, capitalOf, capitalZone, capitalHere, homeOf, zonePct, hasHearth, zoneOfCapital } from '../game/world'
 import { capacity, usedSlots } from '../game/inventory'
 import { questReady } from '../game/quests'
@@ -15,7 +15,7 @@ import { abilityIcon, itemIcon, menuIcon, racialIcon, raceIcon, classIcon } from
 import { firstIcon } from '../render/assets'
 const wellFedIcon = () => firstIcon(['spell_misc_food'])
 import { Bar, Hover, Money } from './common'
-import { layout, saveLayout, startDrag, uiScale, onLayout } from './layout'
+import { layout, saveLayout, startDrag, uiScale, onLayout, BAR_W } from './layout'
 import { beginItemDrag } from './dnd'
 import { isOverlay, native } from '../platform'
 
@@ -105,7 +105,31 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   const pet = activePet(h)
   const pd = petDef(h)
   const g = grants(h)
+  // pasek akcji kończy się przed menu (micro): szerokość menu mierzona na żywo
+  const microRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
+  const [microW, setMicroW] = useState(0)
+  const [barW, setBarW] = useState(900)
+  useEffect(() => {
+    const el = microRef.current, bel = barRef.current
+    if (!el || !bel) return
+    const kids = () => { let w = 0; for (const k of Array.from(el.children)) w += (k as HTMLElement).offsetWidth + 6; return w }
+    const upd = () => { setMicroW(kids()); setBarW(bel.offsetWidth) }
+    upd()
+    const ro = new ResizeObserver(upd)
+    ro.observe(el); ro.observe(bel)
+    return () => ro.disconnect()
+  }, [])
   const bar = c.abilities.filter((a) => active(h, a, g) && a.kind !== 'form' && a.kind !== 'summon' && a.kind !== 'buff' && a.kind !== 'proc')
+  // rozmiar przycisków: jeden rząd do 38 px; gdy umiejętności jest bardzo dużo — dwa rzędy mniejszych
+  const abLay = (() => {
+    const avail = Math.max(120, barW - microW - 16 - 20), n = Math.max(1, bar.length)
+    const gap = n > 18 ? 3 : 6
+    const one = Math.min(38, Math.floor(avail / n - gap))
+    if (one >= 26) return { size: one, gap, rows: 1 }
+    const two = Math.min(22, Math.floor(avail / Math.ceil(n / 2) - 3))
+    return two > one ? { size: two, gap: 3, rows: 2 } : { size: one, gap, rows: 1 }
+  })()
   // pasek buffów postaci: pasywne buffy, nasycenia, pieczęcie, aury, buffy czasowe, totemy, rasowe, Well Fed
   const buffs: { key: string; icon: string; name: string; desc: string; left?: number }[] = []
   for (const a of c.abilities) {
@@ -136,7 +160,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
   // zawsze na ekranie: szerokość i pozycja przycinane do okna przy każdej zmianie skali UI / szerokości paska
   const kk = uiScale()
   const vw = window.innerWidth / kk, vh = window.innerHeight / kk
-  const W = pos.w === 'full' ? null : Math.max(320, Math.min(pos.w, vw))
+  const W = Math.min(BAR_W, vw) // stała szerokość paska
   const stripH = (wrap.current?.closest('.strip') as HTMLElement | null)?.getBoundingClientRect().height ?? 0
   const sx = pos.x == null ? null : W == null ? 0 : Math.min(Math.max(0, pos.x), Math.max(0, vw - W))
   const sy = pos.y == null ? null : Math.min(Math.max(0, pos.y), Math.max(0, vh - (stripH ? stripH / kk : 120)))
@@ -205,7 +229,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
           {cast ? (
             <Bar className="castbar" value={cast.total - cast.left} max={cast.total} color="linear-gradient(#ffd24a,#b08000)" label={<span className="bar-lr"><span>{c.abilities.find((a) => a.id === cast.id)?.name}</span><span>{fmt(Math.max(0, cast.left))} s</span></span>} height={13} />
           ) : (
-            <div className="phase">{phaseText}{h.cp > 0 && <span className="cp">{'●'.repeat(h.cp)}</span>}{(h.stacks.mw ?? 0) > 0 && <span className="cp mw">{'◆'.repeat(h.stacks.mw)}</span>}{(h.stacks.ab ?? 0) > 0 && <span className="cp ab">{'✦'.repeat(h.stacks.ab)}</span>}{pet && <span className="pet"> · {pet.name}</span>}{h.wellFed && <span className="wellfed" title={`${h.wellFed.name}: Well Fed`}> · 🍖</span>}</div>
+            <div className="phase">{phaseText}{(h.stacks.mw ?? 0) > 0 && <span className="cp mw">{'◆'.repeat(h.stacks.mw)}</span>}{(h.stacks.ab ?? 0) > 0 && <span className="cp ab">{'✦'.repeat(h.stacks.ab)}</span>}{pet && <span className="pet"> · {pet.name}</span>}{h.wellFed && <span className="wellfed" title={`${h.wellFed.name}: Well Fed`}> · 🍖</span>}</div>
           )}
           {swinging && (
             <Bar className="swingbar" value={sp - swingLeft} max={sp} color={shooting ? 'linear-gradient(#e8d8a0,#8a7a40)' : 'linear-gradient(#e0e0e0,#808080)'} height={12}
@@ -236,7 +260,8 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
             {sub.zoneBoss && <div className="tt-dim">Blocks the way to the next zone.</div>}
           </Tip>}>
             <Bar value={b.kills} max={b.need} color={b.full ? 'linear-gradient(#ff8a2a,#a03000)' : 'linear-gradient(#e0b030,#7a5a00)'} height={13}
-              label={b.full ? `Boss: ${sub.boss.name}!` : b.kills >= b.need && b.wait > 0 ? `${sub.boss.name} returns in ${Math.ceil(b.wait / 60)} min` : `${b.kills}/${b.need} · boss: ${sub.boss.name}`} />
+              label={b.full ? `Boss: ${sub.boss.name}!` : b.kills >= b.need && b.held ? `${sub.boss.name}: waits for level ${b.holdLvl}` : b.kills >= b.need && b.wait > 0 ? `${sub.boss.name} returns in ${Math.ceil(b.wait / 60)} min` : `${b.kills}/${b.need} · boss: ${sub.boss.name}`} />
+            {b.kills >= b.need && b.held && <button className="wbtn small challenge" onClick={() => challengeBoss(s)}>⚔ Challenge now</button>}
           </Hover>
         ) : (
           <Bar value={1} max={1} color="linear-gradient(#3a8a3a,#1a4a1a)" height={13} label={s.prog[s.loc.zone].cleared >= subs.length ? 'Zone completed' : 'Subzone cleared (farming)'} />
@@ -273,7 +298,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         </div>
       </div>
 
-      <div className="actionbar">
+      <div ref={barRef} className={`actionbar ${abLay.rows > 1 ? 'two' : ''}`} style={{ paddingRight: microW + 16, ['--ab' as string]: `${abLay.size}px`, ['--abg' as string]: `${abLay.gap}px`, ['--per' as string]: Math.ceil(bar.length / abLay.rows) } as CSSProperties}>
         {bar.map((a) => {
           const tot = h.totems.find((t) => t.id === a.id)
           const cdLeft = h.cds[a.id] > 0 && a.cd ? h.cds[a.id] : 0
@@ -296,7 +321,7 @@ export function Strip({ s, sceneRef, open, toggle, act }: {
         })}
       </div>
 
-      <div className="micro">
+      <div className="micro" ref={microRef}>
         <MicroBtn icon={raceIcon(h.race) ?? menuIcon('char')} label="Character Info (C)" on={open.has('char')} onClick={() => toggle('char')} />
         <MicroBtn icon={menuIcon('spell')} label={`Spellbook & Abilities (P)${learnable ? ` · ${learnable} to learn at your trainer` : ''}`} on={open.has('spells')} onClick={() => toggle('spells')} badge={learnable || undefined} />
         <MicroBtn icon={menuIcon('talent')} label={`Talents (N)${freeTalents > 0 ? ` · ${freeTalents} unspent points` : ''}`} on={open.has('talents')} onClick={() => toggle('talents')} badge={freeTalents > 0 ? freeTalents : undefined} />

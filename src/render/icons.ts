@@ -448,7 +448,7 @@ export type MenuKind = 'char' | 'spell' | 'talent' | 'skills' | 'quest' | 'map' 
 export function menuIcon(kind: MenuKind): string {
   const ext = firstIcon(MENU_ICONS[kind])
   if (ext) return ext
-  const key = `m2|${kind}`
+  const key = `m3|${kind}`
   const hit = cache.get(key)
   if (hit) return hit
   const g = canvas()
@@ -512,7 +512,7 @@ export function menuIcon(kind: MenuKind): string {
       g.fillStyle = BG.gear[1]; g.beginPath(); g.arc(32, 32, 7, 0, 7); g.fill()
       break
     }
-    case 'hide': g.fillStyle = '#000'; g.fillRect(14, 37, 36, 10); g.fillStyle = '#e8e8e8'; g.fillRect(16, 39, 32, 6); break // minus: schowaj do zasobnika
+    case 'hide': g.fillStyle = '#000'; g.fillRect(14, 27, 36, 10); g.fillStyle = '#e8e8e8'; g.fillRect(16, 29, 32, 6); break // minus na środku: schowaj do zasobnika
     case 'town': case 'capital':
       P([[12, 54], [12, 30], [32, 14], [52, 30], [52, 54]], '#c8a070', '#3a2a10'); g.fillStyle = '#5a3a1a'; g.fillRect(27, 38, 10, 16)
       break

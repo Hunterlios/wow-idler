@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { advance, newGame, simulateOffline, spiritRes } from '../game/sim'
+import { advance, newGame, simulateOffline, spiritRes, stats } from '../game/sim'
 import { loadGame, saveGame, wipeSave } from '../game/save'
-import { enterCapital, enterTown, leaveTown } from '../game/town'
-import type { GameEvent, GameState, OfflineSummary } from '../game/types'
+import { enterCapital, enterTown, leaveTown, inCombat } from '../game/town'
+import type { EquipSlot, GameEvent, GameState, OfflineSummary } from '../game/types'
 import { RARITY_COLOR } from '../game/types'
 import type { Scene } from '../render/scene'
 import { CharacterCreate } from './CharacterCreate'
@@ -10,7 +10,9 @@ import { Strip, type PanelId } from './Strip'
 import { DragGhost, setDropHandler, setPickHandler, type DragSrc } from './dnd'
 import { onGameEvent, updateLoops, uiOpen, uiClick, uiMicro, itemPick, itemDrop, uiSound, npcGreet } from '../audio/gamesounds'
 import { gameSpeed } from '../game/admin'
-import { dropItem, setEquipHook } from './itemActions'
+import { dropItem, setEquipHook, setDestroyHook } from './itemActions'
+import { destroyItem } from '../game/inventory'
+import { syncQuests } from '../game/quests'
 import { BagsPanel, CharacterPanel, CityPanel, LogPanel, QuestLog, Settings, SkillsPanel, Spellbook, TalentsPanel, fmtTime } from './Panels'
 import { onLayout, uiScale } from './layout'
 import { MapPanel } from './MapPanel'
@@ -27,6 +29,7 @@ export function App() {
   const [game, setGame] = useState<GameState | null>(() => loadGame())
   const [, bump] = useReducer((x: number) => x + 1, 0)
   const [open, setOpen] = useState<Set<PanelId>>(new Set())
+  const [del, setDel] = useState<DragSrc | null>(null)
   const [offline, setOffline] = useState<OfflineSummary | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const sceneRef = useRef<Scene | null>(null)
@@ -161,7 +164,7 @@ export function App() {
   const act = (a: 'town' | 'capital' | 'leave' | 'spirit') => {
     if (a === 'spirit') { spiritRes(game, (e) => sceneRef.current?.onEvent(e, game)); bump(); return }
     const vendorRace = game.hero.faction === 'horde' ? 'troll' : 'gnome'
-    if (a === 'town') { if (!enterTown(game)) toast(game.phase === 'travel' ? 'You are travelling.' : 'This zone has no town.', '#ff4040'); else { setOpen((o) => new Set([...o, 'bags'])); uiSound('ui.open.city'); npcGreet(vendorRace) } }
+    if (a === 'town') { if (!enterTown(game)) toast(game.phase === 'travel' ? 'You are travelling.' : inCombat(game) ? 'You can\'t do that while in combat.' : 'This zone has no town.', '#ff4040'); else { setOpen((o) => new Set([...o, 'bags'])); uiSound('ui.open.city'); npcGreet(vendorRace) } }
     else if (a === 'capital') { const e = enterCapital(game); if (e) toast(e, '#ff4040'); else { setOpen((o) => new Set([...o, 'bags'])); uiSound('ui.hearth', 500); npcGreet(game.hero.faction === 'horde' ? 'orc' : 'dwarf') } }
     else if (a === 'leave') { leaveTown(game); uiSound('ui.close.city') }
     bump()
@@ -169,7 +172,14 @@ export function App() {
   const ax = { bump, toast }
   const itemOf = (src: DragSrc) => src.k === 'inv' ? game.hero.inv[src.idx] : src.k === 'eq' ? game.hero.equip[src.slot as keyof typeof game.hero.equip] : game.hero.bags[src.i]
   setPickHandler((src) => { const it = itemOf(src); if (it) itemPick(it) })
-  setDropHandler((src, target) => { const it = itemOf(src); const r = dropItem(game, src, target); if (r) toast(r.msg, r.color); else if (it && target && target !== 'outside') itemDrop(it); bump() })
+  setDropHandler((src, target) => {
+    const it = itemOf(src)
+    // upuszczenie poza oknami: pytanie o zniszczenie przedmiotu (torby z zawartością się nie niszczy)
+    if (target === 'outside' && it && src.k !== 'bag') { setDel(src); return }
+    const r = dropItem(game, src, target); if (r) toast(r.msg, r.color); else if (it && target && target !== 'outside') itemDrop(it); bump()
+  })
+  setDestroyHook((src) => { if (itemOf(src) && src.k !== 'bag') setDel(src) })
+  const delItem = del ? itemOf(del) : null
 
   return (
     <div className={`root ${isOverlay ? 'overlay' : 'web'}`}>
@@ -191,6 +201,19 @@ export function App() {
       {open.has('map') && <div className="dock-center"><Guard name="World Map" onClose={() => close('map')}><MapPanel s={game} onClose={() => close('map')} bump={bump} /></Guard></div>}
       {open.has('bags') && <div className="dock-right"><Guard name="Bags" onClose={() => close('bags')}><BagsPanel s={game} onClose={() => close('bags')} {...ax} /></Guard></div>}
       {offline && <OfflineModal sum={offline} s={game} onClose={() => setOffline(null)} />}
+      {del && delItem && (
+        <div className="modal wframe destroy-modal" data-solid>
+          <div className="wframe-head"><span className="wframe-title">Destroy item</span></div>
+          <div className="modal-body">
+            <p>Do you want to destroy <b style={{ color: RARITY_COLOR[delItem.rarity] }}>[{delItem.name}]</b>{(delItem.count ?? 1) > 1 ? ` ×${delItem.count}` : ''}?</p>
+            <p className="dim small">It will be gone for good (no buyback).</p>
+            <div className="tr-foot" style={{ justifyContent: 'center' }}>
+              <button className="wbtn red" onClick={() => { const d0 = del; setDel(null); const it = destroyItem(game.hero, d0.k === 'inv' ? { k: 'inv', idx: d0.idx } : { k: 'eq', slot: (d0 as { slot: string }).slot as EquipSlot }); if (it) { syncQuests(game); stats(game.hero); toast(`Destroyed: ${it.name}`, '#ff8060'); uiSound('ui.sheath') } bump() }}>Destroy</button>
+              <button className="wbtn" onClick={() => setDel(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="toasts">{toasts.map((t) => <div key={t.id} className="toast" style={{ color: t.color }}>{t.text}</div>)}</div>
       <Strip s={game} sceneRef={sceneRef} open={open} toggle={toggle} act={act} />
       <DragGhost />
@@ -228,7 +251,7 @@ function WebBackdrop() {
   return (
     <div className="backdrop">
       <div className="backdrop-note">
-        <b>Azeroth Idle — browser version (demo 0.9.9)</b>
+        <b>Azeroth Idle — browser version (demo 0.9.14)</b>
         <span>In the desktop app the background is transparent and the bar sits above the Windows taskbar.</span>
         <span>Hotkeys: C character · B bags · L quests · P spellbook · N talents · K skills · M map · Esc closes windows</span>
       </div>

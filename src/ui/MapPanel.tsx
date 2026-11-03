@@ -187,7 +187,7 @@ export function MapPanel({ s, onClose, bump }: { s: GameState; onClose: () => vo
               ) })()}
             </div>
           )}
-          {!traveling && sel !== s.loc.zone && (() => { const t = tripPlan(s, sel, 0); return t.blocked ? <div className="trip-block">{t.blocked}</div> : <div className="trip-info">🥾 On foot: {fmtSecs(t.total)}{t.form ? ` (${t.form})` : ''}</div> })()}
+          {!traveling && sel !== s.loc.zone && (() => { const t = tripPlan(s, sel, 0); return t.blocked ? <div className="trip-block">{t.blocked}</div> : <div className="trip-info">🥾 On foot: {fmtSecs(t.total)}{t.form ? ` (${t.form})` : ''}{t.saved ? ` · known paths −${fmtSecs(t.saved)}` : ''}</div> })()}
           {sel === s.loc.zone && myPorts.length > 0 && (
             <div className="ports">
               <b>Transport in this zone</b>
@@ -251,6 +251,7 @@ export function TravelConfirm({ s, zone, sub, onGo, onCancel }: { s: GameState; 
           <div className="tc-row"><span>To:</span><b>{t.toName}</b></div>
           <div className="tc-row"><span>Time:</span><b>{fmtSecs(t.total)}</b></div>
           <div className="tc-row"><span>How:</span><b>{t.label || 'on foot'}{t.form ? ` · ${t.form} (faster)` : ''}</b></div>
+          {t.saved ? <div className="tc-row"><span>Known paths:</span><b>−{fmtSecs(t.saved)} (cleared subzones on the way)</b></div> : null}
           {t.via.length > 0 && <div className="tc-row"><span>Via:</span><b>{t.via.map((z) => zoneById(z).name).join(' → ')}</b></div>}
           {lvl > s.hero.level + 3 && <div className="tc-warn">Warning: enemies from level {lvl}, and you are level {s.hero.level}. This will be very hard.</div>}
           <div className="pdim small">Your character doesn't fight while travelling. Quests and progress in other zones are kept.</div>

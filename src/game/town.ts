@@ -12,10 +12,13 @@ import type { GameEvent, GameState, Quest } from './types'
 type Emit = (e: GameEvent) => void
 const noop: Emit = () => {}
 
+// w walce nie da się wejść do miasta (jak w Classicu: Hearthstone przerywa walka, a do miasta trzeba dojść)
+export const inCombat = (s: GameState) => s.phase === 'fight' && !!s.mob && s.mob.hp > 0 && s.hero.hp > 0
 export const HEARTH_CD = 30 * 60 // Hearthstone (w Classicu 60 min; w idlerze 30)
 export function enterTown(s: GameState) {
   const z = zoneById(s.loc.zone)
   if (s.phase === 'travel' || !townOf(z, s.hero.faction)) return false
+  if (inCombat(s)) { log(s, 'You can\'t do that while in combat.', '#ff5050'); return false }
   spiritRes(s, noop, 'Your ghost enters the town. ')
   s.where = 'town'
   s.mob = null
@@ -26,6 +29,7 @@ export function enterTown(s: GameState) {
 // który przenosi postać na mapę stolicy.
 export function enterCapital(s: GameState): string | null {
   if (s.phase === 'travel') return 'You are travelling.'
+  if (inCombat(s)) return 'You can\'t do that while in combat.'
   if (!capitalHere(s) && !s.home) return `Your Hearthstone is not set yet. Walk to ${raceById(s.hero.race).start.capital} (${zoneById(zoneOfCapital(raceById(s.hero.race).start.capital)).name}) or another capital of your faction and set it there.`
   if (!capitalHere(s) && (s.hero.cds.hearth ?? 0) > 0) return `Hearthstone is ready in ${Math.ceil(s.hero.cds.hearth / 60)} min. You can also walk to the capital (${zoneById(capitalZone(s)).name}).`
   spiritRes(s, noop, 'Your ghost enters the capital. ')

@@ -132,11 +132,12 @@ export function mobSprite(name: string, type: MobType, color: string, anim: CAni
 }
 
 // ---------------------------------------------------------------- NPC w miastach
-export type NpcRole = 'quest' | 'vendor' | 'trainer' | 'guard'
+export type NpcRole = 'quest' | 'vendor' | 'trainer' | 'guard' | 'stable'
 export function npcSprite(role: NpcRole, race: RaceId, cls: ClassId, anim: 'idle' | 'walk', f: number, flip = false): Sprite {
   const look = LOOKS[race]
   let outfit: Outfit, weapon: WeaponKind = 'none', off: OffKind = 'none'
   if (role === 'trainer') { outfit = { ...OUTFITS[cls] }; weapon = cls === 'warrior' || cls === 'paladin' ? 'Sword' : cls === 'hunter' ? 'Bow' : cls === 'rogue' ? 'Dagger' : cls === 'shaman' ? 'Mace' : 'Staff' }
+  else if (role === 'stable') { outfit = O({ armor: '#6a5a3a', trim: '#3a2a18', legs: '#4a3a24', chest: 'belt2', belt: '#3a2a18', head: 'hood', pauldron: 'small' }); weapon = 'Whip' }
   else if (role === 'vendor') outfit = O({ armor: '#8a6a3a', trim: '#e8dcc0', legs: '#5a4026', chest: 'sash', belt: '#6a3a1a' })
   else if (role === 'guard') { outfit = O({ armor: race === 'human' || race === 'dwarf' || race === 'gnome' || race === 'nightelf' ? '#3a5aa8' : '#8a2a1a', trim: '#d8b040', legs: '#4a4a52', pauldron: 'big', head: 'helm', chest: 'tabard' }); weapon = 'Polearm' }
   else outfit = O({ armor: '#e8dcc0', trim: '#c8a24a', legs: '#6a5a3a', robe: true, chest: 'trimline' })
@@ -144,9 +145,20 @@ export function npcSprite(role: NpcRole, race: RaceId, cls: ClassId, anim: 'idle
 }
 
 // ---------------------------------------------------------------- pupile: zwierzę łowcy, imp, voidwalker
-export function petSprite(kind: 'beast' | 'imp' | 'voidwalker', anim: CAnim, f: number): Sprite {
+export type PetKind = 'beast' | 'imp' | 'voidwalker' | 'succubus' | 'felhunter' | 'mule'
+export function petSprite(kind: PetKind, anim: CAnim, f: number): Sprite {
+  // Muł kupiecki (towarzysz): szarobury osioł z długimi uszami i jukami
+  if (kind === 'mule') return quadSprite('pet|mule', { col: '#7e7468', belly: '#c8bca8', len: 17, h: 8, leg: 7, legW: 3, head: 6, tail: 5, ears: 'long', muzzle: 'blunt', mane: '#3e3630', neckUp: 4, pack: '#9a7444' }, anim, f)
   if (kind === 'beast') return quadSprite('pet|wolf', { col: '#8a6a4a', len: 18, h: 7, leg: 7, legW: 3, head: 6, tail: 6, ears: 'pointy', muzzle: 'long', belly: '#a8885a' }, anim, f)
+  // Felhunter: oliwkowy demon-ogar z fioletowymi kolcami i mackami na łbie
+  if (kind === 'felhunter') return quadSprite('pet|felhunter', { col: '#6e7038', belly: '#8e8650', len: 19, h: 8, leg: 6, legW: 3, head: 7, tail: 4, ears: 'none', muzzle: 'blunt', spikes: '#8a3ac0', horns: '#5a6a30', eye: '#70ff60', stripes: '#565a2a' }, anim, f)
   const bf = anim === 'idle' ? f * 2 : anim === 'walk' || anim === 'hurt' ? f : fit(f, CF[anim], 8)
+  // Succubus: smukła demonica o lawendowej skórze, rogi, skrzydła nietoperza, ogon, kopyta i bicz
+  if (kind === 'succubus') return bipedSprite('pet|succubus7', {
+    look: L(LOOKS.human, { skin: '#e8a8c8', hair: '#2a1418', hairStyle: 'long', eye: '#60f0ff', glow: true, ears: 'long', horns: 'demon', hornCol: '#8a2a40', hooves: true, wings: '#c0508a', wingBone: '#6a1a3a', wingSize: 1.5, tail: '#c07aa0', leg: 12, torsoH: 11, torsoW: 7, headW: 10, headH: 10, bust: 3 }),
+    outfit: O({ armor: '#1c1a24', bare: true, corset: '#243048', trim: '#d8b060', legs: '#e8a8c8', stockings: '#b02a48', boots: '#2a1a24', spiky: true, glove: '#1c1a24', pauldron: 'none', loin: true, magic: '#ff60c0' }),
+    weapon: 'Whip', off: 'none',
+  }, BIPED_ANIM[anim], bf)
   if (kind === 'imp') return bipedSprite('pet|imp', { look: L(LOOKS.gnome, { skin: '#c83a2a', hair: '#c83a2a', hairStyle: 'none', horns: 'demon', ears: 'goblin', tail: '#8a2018', eye: '#ffe060', glow: true, headW: 10, headH: 9 }), outfit: O({ armor: '#c83a2a', bare: true, loin: true, legs: '#4a1a10', magic: '#ff8020' }), weapon: 'none', off: 'none' }, BIPED_ANIM[anim] === 'attack' ? 'cast' : BIPED_ANIM[anim], bf)
   return bipedSprite('pet|void', { look: L(LOOKS.orc, { skin: '#4a3a8a', hair: '#4a3a8a', hairStyle: 'none', tusks: false, eye: '#e8f0ff', glow: true, lower: 'wisp', torsoW: 14, torsoH: 13, headW: 10, headH: 9, armLen: 3 }), outfit: O({ armor: '#4a3a8a', bare: true, glove: '#c8a040', belt: '#c8a040' }), weapon: 'none', off: 'none' }, BIPED_ANIM[anim], bf)
 }

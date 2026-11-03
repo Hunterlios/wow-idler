@@ -81,6 +81,7 @@ export type MobState = {
   rootl?: string // wygląd unieruchomienia: root, ice
   by?: Record<string, string> // która umiejętność nałożyła dany efekt (stun/root/fear/slow/cc)
   ranged?: boolean // wróg dystansowy (łucznik, mag, szaman): atakuje z daleka, nie podchodzi do zwarcia
+  retreat?: number // ile jeszcze postać odbiega od wroga
   heroRun?: number // ile „sekund dystansu” przebiegła postać walcząca wręcz (scena: spotkanie w środku)
   petIn?: number // ile jeszcze pupil biegnie do wroga
   petOn?: boolean // pupil (tank) trzyma wroga: wróg bije pupila i nie idzie do postaci
@@ -127,10 +128,15 @@ export type Hero = {
   petHp?: number // zdrowie pupila (łowca, czarnoksiężnik)
   petCd?: number // pupil padł: sekundy do powrotu
   heal?: HealCfg // kiedy leczyć się czarem w walce i po walce, a kiedy jeść / odpoczywać
+  comps?: string[] // kupione towarzyszki (muł kupiecki); same ozdoby, nie walczą
+  comp?: string | null // towarzysz chodzący obok postaci
+  sellQ?: number[] // jakości przedmiotów, które muł sprzedaje (0 szare .. 4 epickie)
+  mule?: { left: number; copper: number; n: number } | null // muł w drodze do kupca: sekundy do powrotu, utarg, ile przedmiotów
+  prio?: string[] // własna kolejność umiejętności w rotacji (księga: zakładka Rotation)
   mode?: 'mixed' | 'melee' | 'caster' // styl walki hybryd: czary z dystansu i wręcz / tylko wręcz / czary także w zwarciu
   cds: Record<string, number>
   buffs: Record<string, number>
-  casting: { id: string; left: number; total: number; mult?: number; pb?: number } | null
+  casting: { id: string; left: number; total: number; mult?: number; pb?: number; ticks?: number } | null
   hot: { id?: string; name?: string; perTick: number; left: number; tickIn: number } | null
   shield: number
   gcd: number
@@ -158,7 +164,7 @@ export type Quest = {
   cap?: string // zadanie ze stolicy: oddawane w stolicy frakcji, a nie w mieście mapy
 }
 
-export type ZoneProgress = { cleared: number; kills: number; bossAt?: number; bossFails?: number }
+export type ZoneProgress = { cleared: number; kills: number; bossAt?: number; bossFails?: number; bossHold?: number } // bossHold: po 3 porażkach z rzędu boss czeka na wyższy poziom postaci
 
 export type GameEvent =
   | { t: 'dmg'; src: 'hero' | 'mob' | 'pet'; amt: number; crit?: boolean; school?: School; ability?: string; miss?: 'miss' | 'dodge' | 'parry' | 'absorb'; glance?: boolean; tick?: boolean; target?: 'pet' }
@@ -174,6 +180,8 @@ export type GameEvent =
   | { t: 'death'; boss?: string; reset: boolean }
   | { t: 'petdeath'; name: string }
   | { t: 'turnback' }
+  | { t: 'charge'; ability: string }
+  | { t: 'use'; id: string; ability: string; school?: School; kind: string }
   | { t: 'petback'; name: string }
   | { t: 'revive' }
   | { t: 'zone'; zone: string }
@@ -215,6 +223,8 @@ export type GameState = {
   home?: string // stolica przypisana do Hearthstone
   inCap?: string // stolica, w której teraz jesteś
   v09?: boolean
+  v0910?: boolean // przedmioty przeskalowane do budżetu 0.9.10
+  v0914?: boolean // auto-zakładanie wyłączone (zastąpione przyciskiem)
   totals: Totals
   log: LogLine[]
   savedAt: number

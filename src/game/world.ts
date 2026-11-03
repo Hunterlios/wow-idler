@@ -117,7 +117,7 @@ function walk(a: string, b: string) {
 const okFor = (f: Faction) => (t: Transport) => t.faction === 'neutral' || t.faction === f
 
 export type Waypoint = { zone: string; at: number } // wejście na mapę po `at` sekundach drogi
-export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; walkSecs: number; speed: number; blocked?: string; path: Waypoint[]; via: string[] }
+export type TripPlan = { total: number; kind: 'walk' | 'ship' | 'zeppelin' | 'tram'; label: string; walkSecs: number; speed: number; blocked?: string; path: Waypoint[]; via: string[]; saved?: number }
 // Statki / zeppeliny / tramwaj odjeżdżające z tej mapy
 // Port leży na konkretnej mapie (np. tramwaj w Ironforge na mapie Dun Morogh), a nie w obszarze startowym
 // (Coldridge Valley, Valley of Trials, Shadowglen...): stamtąd trzeba najpierw dojść.
@@ -129,16 +129,20 @@ export const SUB_WALK = 12 // s między podstrefami
 
 // Graf świata: marsz po sąsiednich mapach (LINKS, ten sam ląd) + opcjonalnie transporty
 type Edge = { to: string; secs: number; t?: Transport }
-function edges(faction: Faction, z: string, rides: boolean, speed: number): Edge[] {
+// Znane ścieżki (jak flight pathy): każda wyczyszczona podstrefa mapy skraca marsz przez nią, aż do -60% przy całej mapie
+export const KNOWN_PATH_MAX = 0.6
+export type Known = (zone: string) => number // 0..1: część wyczyszczonych podstref
+export const knownOf = (s: GameState): Known => (z) => { const n = subsOf(z).length; return n ? Math.min(1, (s.prog[z]?.cleared ?? 0) / n) : 0 }
+function edges(faction: Faction, z: string, rides: boolean, speed: number, known?: Known): Edge[] {
   const out: Edge[] = []
   for (const [a, b] of LINKS) {
     const o = a === z ? b : b === z ? a : null
-    if (o && landmass(o) === landmass(z)) out.push({ to: o, secs: walk(z, o) / (1 + speed) })
+    if (o && landmass(o) === landmass(z)) out.push({ to: o, secs: walk(z, o) / (1 + speed) * (1 - KNOWN_PATH_MAX * (known?.(o) ?? 0)) })
   }
   if (rides) for (const p of portsOf(faction, z)) out.push({ to: p.to, secs: p.t.secs, t: p.t })
   return out
 }
-function route(faction: Faction, from: string, to: string, rides: boolean, speed: number) {
+function route(faction: Faction, from: string, to: string, rides: boolean, speed: number, known?: Known) {
   const dist: Record<string, number> = { [from]: 0 }
   const prev: Record<string, { from: string; e: Edge }> = {}
   const done = new Set<string>()
@@ -147,7 +151,7 @@ function route(faction: Faction, from: string, to: string, rides: boolean, speed
     for (const [k, v] of Object.entries(dist)) if (!done.has(k) && v < best) { best = v; u = k }
     if (!u || u === to) break
     done.add(u)
-    for (const e of edges(faction, u, rides, speed)) {
+    for (const e of edges(faction, u, rides, speed, known)) {
       const c = dist[u] + e.secs
       if (c < (dist[e.to] ?? Infinity)) { dist[e.to] = c; prev[e.to] = { from: u, e } }
     }
@@ -169,22 +173,23 @@ export function portHint(faction: Faction, from: string, to: string) {
 
 // allowRide: tylko automatyczne przejście po bossie łączy marsz, rejs i marsz dalej.
 // Gracz z mapy chodzi pieszo po jednym lądzie, a transportem jedzie sam z portu.
-export function planTrip(faction: Faction, from: string, to: string, speed = 0, allowRide = false): TripPlan {
-  if (from === to) { const t = Math.round(SUB_WALK / (1 + speed)); return { total: t, kind: 'walk', label: '', walkSecs: SUB_WALK, speed, path: [], via: [] } }
+export function planTrip(faction: Faction, from: string, to: string, speed = 0, allowRide = false, known?: Known): TripPlan {
+  if (from === to) { const t = Math.round(SUB_WALK / (1 + speed) * (1 - KNOWN_PATH_MAX * (known?.(to) ?? 0))); return { total: t, kind: 'walk', label: '', walkSecs: SUB_WALK, speed, path: [], via: [] } }
   if (!allowRide && landmass(from) !== landmass(to)) {
     const hint = portHint(faction, from, to)
     return { total: 0, kind: 'walk', label: '', walkSecs: 0, speed, path: [], via: [], blocked: hint ? `Another continent. Fastest way: walk to ${zoneById(hint.port).name} and take: ${hint.t.label}.` : 'Another continent: no connection for your faction.' }
   }
-  const steps = route(faction, from, to, allowRide, speed)
+  const steps = route(faction, from, to, allowRide, speed, known)
   if (!steps) return { total: 0, kind: 'walk', label: '', walkSecs: 0, speed, path: [], via: [], blocked: 'No route.' }
-  let t = 0, walkSecs = 0
+  let t = 0, walkSecs = 0, saved = 0, prevZ = from
   let kind: TripPlan['kind'] = 'walk'
   const labels: string[] = []
   const path: Waypoint[] = []
   for (const st of steps) {
     t += st.e.secs
-    if (st.e.t) { kind = st.e.t.kind; labels.push(st.e.t.label) } else walkSecs += st.e.secs * (1 + speed)
+    if (st.e.t) { kind = st.e.t.kind; labels.push(st.e.t.label) } else { walkSecs += walk(prevZ, st.zone); saved += walk(prevZ, st.zone) / (1 + speed) - st.e.secs }
+    prevZ = st.zone
     path.push({ zone: st.zone, at: Math.round(t) })
   }
-  return { total: Math.round(t), kind, label: labels.join(' → '), walkSecs, speed, path, via: steps.slice(0, -1).map((x) => x.zone) }
+  return { total: Math.round(t), kind, label: labels.join(' → '), walkSecs, speed, path, via: steps.slice(0, -1).map((x) => x.zone), saved: Math.round(saved) }
 }

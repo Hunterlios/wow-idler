@@ -245,3 +245,17 @@ export function equipUpgrades(h: Hero) {
   }
   return n
 }
+
+// Zniszczenie przedmiotu z torby albo z ekwipunku (jak przeciągnięcie poza okno w grze)
+export function destroyItem(h: Hero, src: { k: 'inv'; idx: number } | { k: 'eq'; slot: EquipSlot }): Item | null {
+  if (src.k === 'inv') {
+    const it = h.inv[src.idx]
+    if (!it) return null
+    h.inv[src.idx] = null
+    return it
+  }
+  const it = h.equip[src.slot]
+  if (!it) return null
+  delete h.equip[src.slot]
+  return it
+}

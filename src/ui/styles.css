@@ -603,3 +603,41 @@ input.pw { background: #120c06; border: 1px solid #4a3c22; color: #fff; padding:
 .death-pop .dp-title { font: bold 14px var(--title); color: #ff5040; text-shadow: 0 1px 2px #000; }
 .death-pop .dp-sub { font-size: 11px; color: #c0d8ff; }
 @keyframes dpIn { from { opacity: 0; transform: translate(-50%, -40%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.tt-fx { color: #fff; }
+.tt-fx-now { color: #40ff40; }
+.tt-fx-next { color: #8fd8ff; }
+/* 0.9.13: opisy w spellbooku do dwóch linii (pełny opis w tooltipie po najechaniu) */
+.sp-main .pdim { white-space: normal; max-width: 300px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* 0.9.13: połączone torby */
+.bagwin.merged { width: auto; }
+.bagwin.merged .bagwin-grid { grid-template-columns: repeat(8, 38px); justify-content: start; }
+
+.sp-tag.need { background: #4a1414; color: #ff7070; border-color: #7a2020; }
+
+.comp-tab, .stable { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
+.comp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border: 1px solid #3a2e1e; border-radius: 4px; background: rgba(0,0,0,.25); cursor: pointer; }
+.comp-row.on { border-color: #c8a24a; background: rgba(200,162,74,.1); }
+.comp-row.shop { cursor: default; }
+.comp-row .sp-main { flex: 1; }
+.comp-icon { border: 1px solid #5a4a30; border-radius: 3px; image-rendering: pixelated; flex: none; }
+.comp-status { color: #ffd100; font-size: 11px; margin-top: 2px; }
+.comp-q { display: flex; flex-wrap: wrap; gap: 10px; }
+.comp-buy { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.comp-empty { padding: 20px 10px; text-align: center; }
+.char-frame .tabs .right { margin-left: auto; }
+
+.rot-head { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
+.rot-head .pdim { flex: 1; }
+.rot-row { cursor: default; }
+.rot-row .rot-n { width: 22px; text-align: right; color: #ffd100; font-weight: bold; }
+.rot-row .wbtn { padding: 0 6px; }
+
+/* 0.9.14: pasek akcji mieści wszystkie umiejętności (z talentami) i nie wchodzi pod menu: przyciski zmniejszają się, a przy bardzo wielu idą w dwa rzędy */
+.actionbar { gap: var(--abg, 6px); }
+.actionbar .abtn { flex: none; width: var(--ab, 38px); height: var(--ab, 38px); }
+.actionbar.two { display: grid; grid-template-columns: repeat(var(--per), var(--ab)); grid-auto-rows: var(--ab); gap: 3px; align-content: center; }
+.actionbar .abtn .abtn-t { font-size: min(13px, calc(var(--ab, 38px) * 0.42)); }
+
+.comp-sec { color: var(--gold-hi, #ffd100); font: bold 12px var(--title); margin-top: 4px; border-bottom: 1px solid #4a3c22; padding-bottom: 2px; }
+.comp-row .pdim { color: #b8ac90; }
+.rot-head { grid-column: 1 / -1; }

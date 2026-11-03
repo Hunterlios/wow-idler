@@ -131,7 +131,7 @@ export function makeGear(rng: Rng, seq: number, hero: Hero, ilvlIn: number, forc
   // sufiksy z mocą czarów jak w Classicu: "of Sorcery" (Intellect, Stamina, moc), "of Healing" / "of ... Wrath" (sama moc)
   const spellish = (cls.weights.sp ?? 0) > 0
   if (rarity >= 2 && slot !== 'ranged' && ilvl >= 8 && rng.chance(spellish ? 0.35 : 0.06)) {
-    const budget = Math.max(1, ilvl * 0.45 * SLOT_K[slot] * (rarity === 2 ? 1 : rarity === 3 ? 1.35 : 1.7))
+    const budget = Math.max(1, ilvl * GEAR_BUDGET * SLOT_K[slot] * (rarity === 2 ? 1 : rarity === 3 ? 1.35 : 1.7))
     const SCH: Record<string, string> = { mage: 'Fiery', warlock: 'Shadow', priest: 'Holy', druid: "Nature's", shaman: "Nature's", paladin: 'Holy' }
     const kind = rng.pick(['sorcery', 'wrath', 'healing'] as const)
     item.stats = {}
@@ -147,7 +147,7 @@ export function makeGear(rng: Rng, seq: number, hero: Hero, ilvlIn: number, forc
       const scored = SUFFIXES.map((s) => [s, s[1].reduce((a, k) => a + (w[k] ?? 0), 0) / s[1].length] as const).sort((a, b) => b[1] - a[1])
       suffix = rng.pick(scored.slice(0, 4))[0]
     }
-    const budget = Math.max(1, ilvl * 0.45 * SLOT_K[slot] * (rarity === 2 ? 1 : rarity === 3 ? 1.35 : 1.7) * (slot === 'twohand' ? 1 : 1))
+    const budget = Math.max(1, ilvl * GEAR_BUDGET * SLOT_K[slot] * (rarity === 2 ? 1 : rarity === 3 ? 1.35 : 1.7) * (slot === 'twohand' ? 1 : 1))
     item.stats = {}
     suffix[1].forEach((k, i) => (item.stats![k] = Math.max(1, Math.round((budget / suffix[1].length) * (i === 0 ? 1.1 : 0.9)))))
     if (rarity === 2) name = `${name} ${suffix[0]}`
@@ -157,6 +157,10 @@ export function makeGear(rng: Rng, seq: number, hero: Hero, ilvlIn: number, forc
   item.value = Math.round((ilvl * ilvl * 0.15 + 5) * [0.5, 1, 2.5, 5, 12][rarity])
   return item
 }
+
+// 0.9.10: ekwipunek daje wyraźnie więcej (postać bez ekwipunku ma się czuć słaba, jak w Classicu)
+export const GEAR_BUDGET = 0.8
+export const GEAR_RESCALE = 0.8 / 0.45
 
 export function makeJunk(rng: Rng, seq: number, mobType: MobType, mobLvl: number): Item {
   const list = JUNK[mobType] ?? JUNK.beast
@@ -232,6 +236,7 @@ export function starterGear(hero: Hero): Item[] {
     { id: 4, name: `Recruit's ${NOUN[at].feet}`, rarity: 1, ilvl: 1, value: 1, slot: 'feet', armorType: at, armor: Math.round(1 + ARMOR_K[at] * 0.5) },
     { id: 5, name: "Recruit's Shirt", rarity: 1, ilvl: 1, value: 1, slot: 'shirt' },
   ]
+  if (c.id === 'rogue') out.push({ id: 6, name: 'Small Throwing Knife', rarity: 1, ilvl: 1, value: 1, slot: 'ranged', weaponType: 'Thrown', speed: 2.0, dps: 1.8 })
   if (c.id === 'hunter') out.push({ id: 6, name: 'Worn Shortbow', rarity: 1, ilvl: 1, value: 3, slot: 'ranged', weaponType: 'Bow', speed: 2.8, dps: 2.4 })
   return out
 }

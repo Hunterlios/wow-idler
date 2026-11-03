@@ -80,6 +80,16 @@ export class Grid {
   }
   flipH() { for (let y = 0; y < this.h; y++) { const row = this.data.slice(y * this.w, y * this.w + this.w).reverse(); for (let x = 0; x < this.w; x++) this.data[y * this.w + x] = row[x] } }
   // odwrócenie w pionie (zwierzę na grzbiecie): oś na wysokości ay
+  // zgniecenie w pionie względem linii stóp (osunięcie się na ziemię) z lekkim przechyłem do przodu
+  squash(fy: number, foot: number, shear = 0) {
+    const src = this.data.slice(); this.data.fill(null)
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+      const c = src[y * this.w + x]
+      if (!c) continue
+      const ny = Math.round(foot - (foot - y) * fy), nx = Math.round(x + (foot - y) * shear)
+      if (ny >= 0 && ny < this.h && nx >= 0 && nx < this.w && !this.data[ny * this.w + nx]) this.data[ny * this.w + nx] = c
+    }
+  }
   flipV(ay: number) { const src = this.data.slice(); this.data.fill(null); for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) { const sy = Math.round(2 * ay - y); if (sy >= 0 && sy < this.h) this.data[y * this.w + x] = src[sy * this.w + x] } }
   shift(dx: number, dy: number) { const src = this.data.slice(); this.data.fill(null); for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) { const sx = x - dx, sy = y - dy; if (sx >= 0 && sy >= 0 && sx < this.w && sy < this.h) this.data[y * this.w + x] = src[sy * this.w + sx] } }
   // rozpad (żywiołaki, szlam): część pikseli opada / znika
@@ -105,6 +115,7 @@ export type Look = {
   muzzle?: 'tauren' | 'hyena' | 'boar' | 'bear' | 'fish' | 'beak' | 'rat' | 'croc' | 'wolf'; jaw?: boolean; nose?: 'long' | 'small' | 'big'
   hooves?: boolean; hunch?: number; spines?: string; wings?: string; tail?: string; fin?: string; lower?: 'serpent' | 'wisp' | 'goat' | 'talon'
   armLen?: number; claws?: boolean; ribs?: boolean; stitches?: boolean; oneEye?: boolean; fur?: boolean
+  bust?: number; wingSize?: number; wingBone?: string; hornCol?: string // demonica (Succubus): biust, duże skrzydła, kolor rogów
 }
 export const LOOKS: Record<RaceId, Look> = {
   human: { skin: '#e8b48a', hair: '#6b4423', eye: '#24160c', leg: 8, torsoH: 9, torsoW: 9, headW: 11, headH: 11, hairStyle: 'short', nose: 'small' },
@@ -123,6 +134,7 @@ export type Outfit = {
   head?: 'hood' | 'pointy' | 'antlers' | 'circlet' | 'bandana' | 'helm' | 'hardhat' | 'candle' | 'feather' | 'crown'
   chest?: 'tabard' | 'strap' | 'sash' | 'skull' | 'trimline' | 'belt2' | 'rags'; magic: string
   shield?: string; quiver?: boolean; mask?: string; belt?: string; pauldronCol?: string; bare?: boolean; loin?: boolean
+  corset?: string; stockings?: string; spiky?: boolean // gorset ze złotą lamówką, kolor dolnej części nóg, kolce na butach
 }
 export const OUTFITS: Record<ClassId, Outfit> = {
   warrior: { armor: '#8494b4', trim: '#6a4424', legs: '#5c6a86', boots: '#4a3020', glove: '#6c7a96', pauldron: 'big', chest: 'belt2', magic: '#ffd060', shield: '#8a2a24' },
@@ -136,7 +148,7 @@ export const OUTFITS: Record<ClassId, Outfit> = {
   druid: { armor: '#a85c28', trim: '#5a7a2a', legs: '#7a4420', boots: '#4a2a12', glove: '#7a4420', pauldron: 'mid', head: 'antlers', chest: 'sash', magic: '#80ff80', pauldronCol: '#5a7a2a' },
 }
 
-export type WeaponKind = 'Sword' | 'Greatsword' | 'Axe' | 'Greataxe' | 'Mace' | 'Maul' | 'Dagger' | 'Staff' | 'Polearm' | 'Bow' | 'Crossbow' | 'Gun' | 'Wand' | 'Fist' | 'Club' | 'Spear' | 'Pick' | 'none'
+export type WeaponKind = 'Sword' | 'Greatsword' | 'Axe' | 'Greataxe' | 'Mace' | 'Maul' | 'Dagger' | 'Staff' | 'Polearm' | 'Bow' | 'Crossbow' | 'Gun' | 'Wand' | 'Fist' | 'Club' | 'Spear' | 'Pick' | 'Whip' | 'Food' | 'Drink' | 'none'
 export type OffKind = 'Shield' | 'Weapon' | 'Orb' | 'none'
 export type Anim = 'idle' | 'walk' | 'attack' | 'shoot' | 'cast' | 'hurt' | 'death' | 'sit'
 export const FRAMES: Record<Anim, number> = { idle: 8, walk: 8, attack: 8, shoot: 8, cast: 8, hurt: 4, death: 8, sit: 2 }
@@ -144,7 +156,7 @@ export const FRAMES: Record<Anim, number> = { idle: 8, walk: 8, attack: 8, shoot
 // Siatka bohatera: 56×64, stopy na y=60, środek ciała x=24 (większe postaci mają większą siatkę)
 export const GRID_W = 56, GRID_H = 64, FOOT_Y = 60, BODY_X = 24
 export type Sprite = { cv: HTMLCanvasElement; ox: number; oy: number; top: number; left: number; right: number }
-export type BipedSpec = { look: Look; outfit: Outfit; weapon: WeaponKind; off: OffKind }
+export type BipedSpec = { look: Look; outfit: Outfit; weapon: WeaponKind; off: OffKind; mat?: string; glow?: string; offW?: WeaponKind; offMat?: string; offGlow?: string }
 const gridFor = (L: Look) => {
   const H = Math.max(GRID_H, L.leg + L.torsoH + L.headH + 34)
   const W = Math.max(GRID_W, L.torsoW * 2 + 36)
@@ -185,7 +197,7 @@ function pose(anim: Anim, f: number): Pose {
     case 'hurt': return P({ lean: [-1, -2, -2, -1][f], armF: [0.9, 1.2, 1.0, 0.6][f], armB: [-0.8, -1.0, -0.8, -0.4][f], wpn: [2.2, 2.0, 2.2, 2.4][f], tintRed: [0.4, 0.25, 0.1, 0][f], head: -1, footF: 0, footB: -2 })
     case 'death': {
       const rot = [0, 0, 0.1, 0.35, 0.75, 1.15, 1.45, 1.571][f]
-      return P({ lean: f < 2 ? -2 : -1, armF: 1.1 + f * 0.1, armB: -0.9, wpn: 2.0 - f * 0.2, tintRed: f < 2 ? 0.35 - f * 0.15 : 0, sink: [0, 1, 2, 3, 3, 3, 3, 3][f], rot, head: -1 })
+      return P({ lean: f < 2 ? -2 : -1, armF: f < 3 ? 1.1 + f * 0.1 : Math.max(0.2, 1.3 - (f - 2) * 0.35), armB: f < 3 ? -0.9 : -0.3, wpn: 2.0 - f * 0.2, tintRed: f < 2 ? 0.35 - f * 0.15 : 0, sink: [0, 1, 2, 3, 3, 3, 3, 3][f], rot, head: -1 })
     }
     case 'sit': return P({ sit: true, armF: f ? 2.6 : 0.9, armB: 0.3, wpn: 2.0 })
   }
@@ -194,8 +206,9 @@ function pose(anim: Anim, f: number): Pose {
 const SKY = (a: number, L: number): [number, number] => [Math.sin(a) * L, Math.cos(a) * L]
 
 // ---------------------------------------------------------------- broń
-export function drawWeapon(g: Grid, kind: WeaponKind, hx: number, hy: number, a: number, magic: RGB, flash: boolean) {
-  const steel: RGB = hex('#d0d6e0'), steelD = hex('#8a92a0'), wood = hex('#7a4a22'), woodD = hex('#523018'), gold = hex('#d8a830')
+// mat: kolor metalu broni (zależy od poziomu przedmiotu), glow: poświata jakości (rzadki / epicki)
+export function drawWeapon(g: Grid, kind: WeaponKind, hx: number, hy: number, a: number, magic: RGB, flash: boolean, mat?: string, glow?: string) {
+  const steel: RGB = mat ? hex(mat) : hex('#d0d6e0'), steelD = tone(steel, -0.35), wood = hex('#7a4a22'), woodD = hex('#523018'), gold = hex('#d8a830')
   const L = (n: number) => SKY(a, n)
   const tip = (n: number) => { const [dx, dy] = L(n); return [hx + dx, hy + dy] as [number, number] }
   const back = (n: number) => { const [dx, dy] = L(-n); return [hx + dx, hy + dy] as [number, number] }
@@ -234,6 +247,30 @@ export function drawWeapon(g: Grid, kind: WeaponKind, hx: number, hy: number, a:
     case 'Club': {
       const [bx, by] = back(1), [tx, ty] = tip(11)
       g.line(bx, by, tx, ty, wood, 3); g.ellipse(tx, ty, 2.5, 2.5, woodD); g.set(tx + 1, ty - 1, hex('#c8c8c8'))
+      break
+    }
+    case 'Food': {
+      // udko / bochenek w dłoni
+      g.ellipse(hx + 1, hy - 2, 2.2, 2.2, hex('#b86a2a')); g.set(hx, hy - 3, hex('#e09a52'))
+      g.line(hx - 1, hy, hx - 2, hy + 2, hex('#f0e8d8'), 1); g.set(hx - 3, hy + 2, hex('#f0e8d8'))
+      break
+    }
+    case 'Drink': {
+      // butelka wody
+      g.rect(hx, hy - 5, 3, 5, hex('#5aa8e0')); g.rect(hx, hy - 5, 1, 4, hex('#a8dcff')); g.rect(hx + 1, hy - 7, 1, 2, hex('#c8a060'))
+      break
+    }
+    case 'Whip': {
+      // bicz sukkuba: krótka rączka i długi, falujący rzemień
+      const [tx, ty] = tip(4)
+      g.line(hx, hy, tx, ty, hex('#3a1a2a'), 2)
+      let px = tx, py = ty
+      for (let i = 1; i <= 7; i++) {
+        const [dx, dy] = SKY(a + Math.sin(i * 0.9 + a * 3) * 0.6, 2)
+        const nx = px + dx, ny = py + dy + (i > 3 ? 1 : 0)
+        g.line(Math.round(px), Math.round(py), Math.round(nx), Math.round(ny), i === 7 ? magic : hex('#5a2a3a'), 1)
+        px = nx; py = ny
+      }
       break
     }
     case 'Pick': {
@@ -276,6 +313,12 @@ export function drawWeapon(g: Grid, kind: WeaponKind, hx: number, hy: number, a:
     }
     default: break
   }
+  // poświata jakości: iskry wzdłuż broni
+  if (glow && kind !== 'none') {
+    const gc = hex(glow), LEN: Partial<Record<WeaponKind, number>> = { Greatsword: 17, Greataxe: 17, Maul: 16, Staff: 14, Polearm: 16, Spear: 15, Dagger: 7, Fist: 4 }
+    const n = LEN[kind] ?? 11
+    for (const k of [n, n - 3, n - 6]) { const [x, y] = tip(k); g.set(Math.round(x), Math.round(y), k === n ? tone(gc, 0.4) : gc) }
+  }
 }
 
 // ---------------------------------------------------------------- dwunożna postać (bohater, NPC, humanoidalne moby)
@@ -317,8 +360,12 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
   if (L.wings) {
     const wc = hex(L.wings), flap = anim === 'walk' || anim === 'attack' ? [0, 2, 4, 2][f % 4] : [0, 1, 1, 0][f % 4]
     const wx = tx + 1, wy = torsoTop + 1
-    for (let i = 0; i < 9; i++) g.line(wx, wy, wx - 6 - i, wy - 10 + i * 2 + flap, i % 3 === 0 ? tone(wc, -0.3) : wc, 1)
-    g.line(wx, wy, wx - 14, wy - 11 + flap, tone(wc, -0.4), 1)
+    const ws = L.wingSize ?? 1, n = Math.round(9 * ws)
+    const bone = L.wingBone ? hex(L.wingBone) : tone(wc, -0.4)
+    for (let i = 0; i < n; i++) g.line(wx, wy, wx - Math.round((6 + i) * ws * 0.8), wy - Math.round(10 * ws) + Math.round(i * 2 * 0.9) + flap, i % 3 === 0 ? tone(wc, -0.25) : wc, 1)
+    // kości skrzydła i postrzępiony brzeg
+    g.line(wx, wy, wx - Math.round(14 * ws), wy - Math.round(11 * ws) + flap, bone, ws > 1 ? 2 : 1)
+    if (ws > 1) for (let k = 0; k < 3; k++) g.line(wx - Math.round(14 * ws), wy - Math.round(11 * ws) + flap, wx - Math.round((8 + k * 4) * ws * 0.8), wy - Math.round(10 * ws) + Math.round((4 + k * 6) * 0.9) + flap, bone, 1)
   }
   if (L.tail && !ps.sit) { const tc = hex(L.tail), sw = [0, 1, 0, -1][f % 4]; g.line(tx, hipY - 2, tx - 5, hipY + 1 + sw, tc, 2); g.line(tx - 5, hipY + 1 + sw, tx - 8, hipY - 2 + sw, tc, 1) }
 
@@ -329,7 +376,7 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
     const sx = Math.max(tx - 3, backHand[0] - 2), sy = backHand[1] - 6
     g.box(sx, sy, 7, 10, sc, 0.25, -0.35)
     g.rect(sx, sy, 7, 1, hex('#d8a830')); g.rect(sx, sy + 9, 7, 1, hex('#a07a20')); g.rect(sx + 3, sy + 2, 1, 6, hex('#d8a830')); g.rect(sx + 2, sy + 4, 3, 1, hex('#d8a830'))
-  } else if (spec.off === 'Weapon' && !ranged) drawWeapon(g, 'Dagger', backHand[0], backHand[1], ps.armB + 2.4, magic, false)
+  } else if (spec.off === 'Weapon' && !ranged) drawWeapon(g, spec.offW ?? 'Dagger', backHand[0], backHand[1], ps.armB + 2.4, magic, false, spec.offMat, spec.offGlow)
   else if (spec.off === 'Orb') g.ellipse(backHand[0] + 1, backHand[1] - 2, 2, 2, magic)
   if (O.quiver) { g.box(tx - 2, shY - 2, 3, 9, hex('#6a3e1c')); g.rect(tx - 2, shY - 4, 1, 2, hex('#e8e0c8')); g.rect(tx, shY - 5, 1, 3, hex('#e8e0c8')) }
   if (L.spines) { const sp = hex(L.spines); for (let i = 0; i < 5; i++) g.line(tx + 1, torsoTop + 1 + i * 2, tx - 4, torsoTop - 2 + i * 3, i % 2 ? sp : tone(sp, -0.25), 1) }
@@ -364,7 +411,9 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
         const t = (y - top) / Math.max(1, bottom - top)
         // nogi koźle / ptasie: kolano wygięte do tyłu
         const knee = L.lower === 'goat' || L.lower === 'talon' ? Math.round(Math.sin(t * Math.PI) * -2) : 0
-        g.rect(Math.round(x0 + dx * t) + knee, y, L.lower === 'talon' ? 2 : legW, 1, y >= bottom - 3 && !L.hooves && L.lower !== 'talon' ? bc : c)
+        const lc = O.stockings && t > 0.4 ? (front ? hex(O.stockings) : tone(hex(O.stockings), -0.22)) : c
+        g.rect(Math.round(x0 + dx * t) + knee, y, L.lower === 'talon' ? 2 : legW, 1, y >= bottom - 3 && !L.hooves && L.lower !== 'talon' ? bc : O.spiky && t > 0.62 ? bc : lc)
+        if (O.spiky && t > 0.62 && (y % 2 === 0)) g.set(Math.round(x0 + dx * t) - 1, y, tone(bc, 0.3))
       }
       const fx = x0 + dx
       if (L.hooves || L.lower === 'goat') g.rect(fx, bottom - 1, legW, 1, hex('#2a1a10'))
@@ -394,7 +443,14 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
     g.rect(tx - 2 + sway, rb, L.torsoW + 4, 1, trim)
     if (!ps.sit) { g.rect(bx + ps.footF + legW - 2, footY - 2, 3, 2, boots); g.rect(legX(false) + ps.footB, footY - 2, 2, 2, tone(boots, -0.2)) }
   }
-  if (O.loin) { g.rect(tx + 1, hipY - 1, L.torsoW - 2, 4, legs); g.rect(tx + 2, hipY + 3, L.torsoW - 4, 1, tone(legs, -0.3)) }
+  if (O.loin) { const lcol = O.corset ? hex(O.corset) : legs; g.rect(tx + 1, hipY - 1, L.torsoW - 2, O.corset ? 3 : 4, lcol); g.rect(tx + 2, hipY + (O.corset ? 2 : 3), L.torsoW - 4, 1, O.corset ? trim : tone(legs, -0.3)) }
+  // gorset: stanik i pas ze złotą lamówką, odsłonięty brzuch; biust wysunięty do przodu (postać patrzy w prawo)
+  if (O.corset) {
+    const cc = hex(O.corset), hi = tone(cc, 0.35)
+    g.rect(tx, torsoTop + 1, L.torsoW, 3, cc); g.rect(tx, torsoTop + 1, L.torsoW, 1, trim)
+    g.rect(tx + 1, torsoTop + 4, L.torsoW - 1, 2, cc); g.rect(tx + 1, torsoTop + 6, L.torsoW - 1, 1, trim) // gorset, niżej odsłonięty brzuch
+    void hi
+  }
   const cx = tx + Math.floor(L.torsoW / 2)
   switch (O.chest) {
     case 'tabard': g.box(cx - 1, torsoTop + 2, 4, hipY - torsoTop + (O.robe ? 0 : 3), trim, 0.2, -0.3); g.rect(cx, torsoTop + 4, 2, 2, hex('#e8c860')); break
@@ -468,7 +524,8 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
     case 'ragged': g.rect(hx - 1, hy - 1, hw - 2, 2, hair); g.rect(hx - 1, hy, 2, 6, hair); g.set(hx + 2, hy + 1, hairD); g.set(hx + 4, hy + 1, hair); break
   }
   if (L.horns === 'tauren') { g.line(hx + hw - 3, hy + 1, hx + hw + 1, hy - 2, bone, 2); g.line(hx + hw + 1, hy - 2, hx + hw + 1, hy - 5, bone, 1) }
-  if (L.horns === 'satyr' || L.horns === 'demon') { const hc = L.horns === 'satyr' ? hex('#5a4030') : hex('#2a1a1a'); g.line(hx + 2, hy, hx - 1, hy - 4, hc, 2); g.line(hx - 1, hy - 4, hx - 3, hy - 3, hc, 1); g.line(hx + hw - 3, hy, hx + hw - 3, hy - 4, hc, 2); g.set(hx + hw - 2, hy - 5, hc) }
+  if (L.hornCol) { const hc = hex(L.hornCol), hd = tone(hc, -0.3); g.line(hx + 2, hy + 1, hx - 1, hy - 4, hc, 2); g.line(hx - 1, hy - 4, hx + 1, hy - 7, hd, 2); g.line(hx + 1, hy - 7, hx + 3, hy - 8, hd, 1); g.line(hx + hw - 3, hy, hx + hw - 2, hy - 5, hc, 2); g.line(hx + hw - 2, hy - 5, hx + hw, hy - 7, hd, 1) }
+  else if (L.horns === 'satyr' || L.horns === 'demon') { const hc = L.horns === 'satyr' ? hex('#5a4030') : hex('#2a1a1a'); g.line(hx + 2, hy, hx - 1, hy - 4, hc, 2); g.line(hx - 1, hy - 4, hx - 3, hy - 3, hc, 1); g.line(hx + hw - 3, hy, hx + hw - 3, hy - 4, hc, 2); g.set(hx + hw - 2, hy - 5, hc) }
   if (L.horns === 'dragon') { g.line(hx + 2, hy + 1, hx - 3, hy - 3, boneD, 2); g.line(hx + 5, hy, hx + 2, hy - 4, bone, 2) }
   // nakrycie głowy
   const cl = armor, clD = tone(armor, -0.3)
@@ -495,7 +552,7 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
   const frontSh: [number, number] = [tx + L.torsoW - 2, torsoTop + 2]
   if (ranged && (spec.weapon === 'Gun' || spec.weapon === 'Crossbow')) {
     const [hx2, hy2] = drawArm(frontSh[0], frontSh[1], 1.45, false)
-    drawWeapon(g, spec.weapon, hx2, hy2 - 1, 0, magic, !!ps.flash)
+    drawWeapon(g, spec.weapon, hx2, hy2 - 1, 0, magic, !!ps.flash, spec.mat, spec.glow)
   } else if (ranged) {
     const [hx2, hy2] = drawArm(frontSh[0], frontSh[1], ps.armF, false)
     drawWeapon(g, 'Bow', hx2, hy2, 0, magic, false)
@@ -509,8 +566,8 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
     const [hx2, hy2] = drawArm(frontSh[0], frontSh[1], ps.armF, false)
     if (anim === 'death' && f >= 4) { /* broń wypada z ręki */ }
     else if (spec.weapon === 'Bow') drawWeapon(g, 'Bow', hx2, hy2 - 1, 0, magic, false)
-    else if (spec.weapon === 'Gun' || spec.weapon === 'Crossbow') drawWeapon(g, spec.weapon, hx2 + 2, hy2, 0, magic, false)
-    else drawWeapon(g, spec.weapon, hx2, hy2, ps.wpn, magic, false)
+    else if (spec.weapon === 'Gun' || spec.weapon === 'Crossbow') drawWeapon(g, spec.weapon, hx2 + 2, hy2, 0, magic, false, spec.mat, spec.glow)
+    else drawWeapon(g, spec.weapon, hx2, hy2, ps.wpn, magic, false, spec.mat, spec.glow)
     if (ps.glow > 0) {
       const r = 1 + ps.glow * 2
       g.ellipse(hx2 + 2, hy2 - 2, r, r, magic, false)
@@ -519,6 +576,15 @@ export function buildBiped(spec: BipedSpec, anim: Anim, f: number): Grid {
     }
   }
 
+  // biust w gorsecie: rysowany na wierzchu (przed ramieniem), wysunięty do przodu
+  if (O.corset && (L.bust ?? 0) > 0 && !ps.rot) {
+    const cc = hex(O.corset), hi = tone(cc, 0.45), x0 = tx + L.torsoW - 3, y0 = torsoTop + 1
+    const P = L.bust! >= 3
+      ? ['ssss...', 'ttttt..', 'chhhcc.', 'chgchcc', 'cchcccc', 'ccccc..', 'tttt...']
+      : ['ss....', 'ttt...', 'chcc..', 'cccc..', 'ttt...']
+    const col: Record<string, RGB> = { s: skin, t: trim, c: cc, h: hi, g: tone(trim, 0.3) }
+    P.forEach((row, j) => { for (let i = 0; i < row.length; i++) { const k = row[i]; if (col[k]) g.set(x0 + i, y0 + j, col[k]) } })
+  }
   g.outline()
   if (ps.tintRed > 0) g.tint([255, 40, 30], ps.tintRed)
   // upadek na plecy: najpierw przesuwamy w prawo, żeby leżące ciało zmieściło się w siatce
@@ -555,9 +621,17 @@ export function bipedSprite(key: string, spec: BipedSpec, anim: Anim, f: number,
 }
 
 // ---------------------------------------------------------------- bohater
-export type HeroKey = { race: RaceId; cls: ClassId; weapon: WeaponKind; off: OffKind }
+export type HeroKey = { race: RaceId; cls: ClassId; weapon: WeaponKind; off: OffKind; mat?: string; glow?: string; offW?: WeaponKind; offMat?: string; offGlow?: string }
 export function heroSprite(k: HeroKey, anim: Anim, f: number): Sprite {
-  return bipedSprite(`H|${k.race}|${k.cls}|${k.weapon}|${k.off}`, { look: LOOKS[k.race], outfit: OUTFITS[k.cls], weapon: k.weapon, off: k.off }, anim, f)
+  return bipedSprite(`H|${k.race}|${k.cls}|${k.weapon}|${k.off}|${k.mat ?? ''}|${k.glow ?? ''}|${k.offW ?? ''}|${k.offMat ?? ''}|${k.offGlow ?? ''}`,
+    { look: LOOKS[k.race], outfit: OUTFITS[k.cls], weapon: k.weapon, off: k.off, mat: k.mat, glow: k.glow, offW: k.offW, offMat: k.offMat, offGlow: k.offGlow }, anim, f)
+}
+// wygląd broni z przedmiotu: metal wg poziomu przedmiotu, poświata wg jakości
+export function weaponLook(it: { ilvl: number; rarity: number } | undefined): { mat?: string; glow?: string } {
+  if (!it) return {}
+  const mat = it.ilvl < 10 ? '#a8a49c' : it.ilvl < 22 ? '#d0d6e0' : it.ilvl < 35 ? '#eef2f8' : it.ilvl < 48 ? '#bfe4f4' : '#e4d4ff'
+  const glow = it.rarity >= 4 ? '#c060ff' : it.rarity === 3 ? '#4aa8ff' : it.rarity === 2 ? '#7aff7a' : undefined
+  return { mat, glow }
 }
 export const heroFrame = (k: HeroKey, anim: Anim, f: number) => heroSprite(k, anim, f).cv
 
@@ -577,9 +651,16 @@ function cpose(anim: CAnim, f: number): CPose {
 }
 // wspólne zakończenie klatki stwora: kontur, czerwień trafienia, śmierć (na grzbiet / rozpad)
 function bounds(g: Grid) { let a = g.h, b = 0; g.data.forEach((c, i) => { if (c) { const y = Math.floor(i / g.w); a = Math.min(a, y); b = Math.max(b, y) } }); return [a, b] }
-function finish(g: Grid, p: CPose, foot: number, death: 'flip' | 'crumble' | 'fall') {
+function finish(g: Grid, p: CPose, foot: number, death: 'flip' | 'crumble' | 'fall' | 'collapse') {
   g.outline()
   if (p.red) g.tint([255, 40, 30], p.red)
+  if (p.dead >= 2 && death === 'collapse') {
+    // wysokie stwory (centaury, raptory, strusie): nogi się uginają i ciało osuwa się na ziemię, bez przewracania na głowę
+    const k = Math.min(1, (p.dead - 1) / 3)
+    const [, b] = bounds(g)
+    g.squash(1 - 0.5 * k, b, 0.18 * k)
+    return g
+  }
   if (p.dead >= 2) {
     if (death === 'crumble') { g.crumble(Math.min(0.85, (p.dead - 1) * 0.2), p.dead); const [, b] = bounds(g); g.shift(0, Math.min(p.dead * 2, foot - b)) }
     else {
@@ -593,9 +674,10 @@ function finish(g: Grid, p: CPose, foot: number, death: 'flip' | 'crumble' | 'fa
 
 export type QuadSpec = {
   col: string; belly?: string; len: number; h: number; leg: number; legW: number; head: number; tail: number; tailW?: number
-  ears?: 'pointy' | 'round' | 'none'; muzzle?: 'long' | 'short' | 'croc' | 'beak' | 'blunt'; tusks?: boolean; horns?: string
+  ears?: 'pointy' | 'round' | 'none' | 'long'; muzzle?: 'long' | 'short' | 'croc' | 'beak' | 'blunt'; tusks?: boolean; horns?: string
   stripes?: string; spots?: string; mane?: string; spikes?: string; shell?: string; eye?: string; hump?: boolean; neckUp?: number
   upper?: Look; upperOutfit?: Outfit // centaur: tułów i głowa jeźdźca
+  pack?: string // juki na grzbiecie (muł kupiecki)
 }
 const quadGrid = (q: QuadSpec) => ({ W: q.len + q.tail + q.head * 2 + 22, H: q.h + q.leg + (q.upper ? 34 : 20) })
 export function buildQuad(q: QuadSpec, anim: CAnim, f: number): Grid {
@@ -630,6 +712,16 @@ export function buildQuad(q: QuadSpec, anim: CAnim, f: number): Grid {
   if (q.spots) for (let i = 0; i < 8; i++) g.set(x0 + 3 + i * Math.floor((q.len - 6) / 8) + (i % 2), bodyY + 2 + (i % 3), hex(q.spots))
   if (q.spikes) for (let i = 0; i < 6; i++) { const sx = x0 + 3 + i * Math.floor((q.len - 6) / 6); g.line(sx, bodyY + 1, sx - 1, bodyY - 2 - (i % 2), hex(q.spikes), 1) }
   if (q.mane) { const mc = hex(q.mane); g.ellipse(x0 + q.len - 5, bodyY + 2, 5, q.h / 2 + 1, mc) }
+  if (q.pack) {
+    // juki: dwa worki po bokach, zwinięty koc i rzemień
+    const pc = hex(q.pack), pd = tone(pc, -0.3), pl = tone(pc, 0.25)
+    g.box(X - 6, bodyY - 3, 12, 4, hex('#8a2a1a'), 0.15, -0.25) // koc
+    g.box(X - 7, bodyY + 1, 6, 6, pc, 0.2, -0.3)
+    g.box(X + 1, bodyY + 1, 6, 6, pc, 0.2, -0.3)
+    g.rect(X - 7, bodyY + 3, 14, 1, pd)
+    g.set(X - 4, bodyY + 4, pl); g.set(X + 4, bodyY + 4, pl)
+    g.rect(X - 1, bodyY - 1, 2, q.h + 1, hex('#4a2a14')) // popręg
+  }
   if (q.head > 0) {
   // głowa
   const hx = x0 + q.len - 3, hy = bodyY - (q.neckUp ?? 2) + (p.swipe ? 1 : 0)
@@ -645,6 +737,7 @@ export function buildQuad(q: QuadSpec, anim: CAnim, f: number): Grid {
   }
   if (q.tusks) { g.line(hx + 6, hy + 6, hx + 8, hy + 2, hex('#f4f0e0'), 1); g.set(hx + 9, hy + 2, hex('#f4f0e0')) }
   if (q.horns) { const hc = hex(q.horns); g.line(hx + 1, hy, hx - 2, hy - 4, hc, 2); g.line(hx + 3, hy, hx + 4, hy - 4, hc, 1) }
+  if (q.ears === 'long') { g.line(hx, hy + 1, hx - 2, hy - 5, col, 2); g.line(hx + 3, hy, hx + 2, hy - 6, dark, 2); g.set(hx - 1, hy - 3, lite) }
   if (q.ears === 'pointy') { g.rect(hx, hy - 2, 2, 3, col); g.set(hx, hy - 3, col); g.rect(hx + 3, hy - 2, 2, 3, dark); g.set(hx + 3, hy - 3, dark) }
   if (q.ears === 'round') { g.rect(hx - 1, hy - 1, 3, 2, col); g.rect(hx + 3, hy - 1, 3, 2, dark) }
   const eye = q.eye ? hex(q.eye) : hex('#140c0a')
@@ -665,7 +758,7 @@ export function buildQuad(q: QuadSpec, anim: CAnim, f: number): Grid {
     g.rect(hx2 - 1, hy2 - 1, hw + 1, 3, hex(up.hair)); g.rect(hx2 - 2, hy2, 3, hh + 3, hex(up.hair))
     if (up.horns) { g.line(hx2 + 2, hy2, hx2 - 1, hy2 - 4, hex('#5a4030'), 2); g.line(hx2 + hw - 3, hy2, hx2 + hw - 2, hy2 - 4, hex('#5a4030'), 2) }
   }
-  return finish(g, p, foot, 'flip')
+  return finish(g, p, foot, q.upper ? 'collapse' : 'flip')
 }
 export function quadSprite(key: string, q: QuadSpec, anim: CAnim, f: number, flip = false, darken = 0): Sprite {
   const { W, H } = quadGrid(q)
@@ -726,7 +819,7 @@ export function buildRaptor(col: string, anim: CAnim, f: number, big = false): G
   g.set(X + 11, by - 9, hex('#ffd040'))
   g.line(X + 5, by + 2, X + 8, by + 4, d, 1)
   for (let i = 0; i < 3; i++) g.set(X + 8 + i, by - 11 - (i % 2), hex('#c04030'))
-  return finish(g, p, foot, 'flip')
+  return finish(g, p, foot, 'collapse')
 }
 // --- ptaki: sęp / harpia-ptak / nietoperz / sowa / hipogryf; unoszą się i machają skrzydłami
 export function buildBird(col: string, kind: 'bird' | 'bat' | 'owl' | 'big' | 'ptero', anim: CAnim, f: number): Grid {
@@ -766,7 +859,7 @@ export function buildStrider(col: string, anim: CAnim, f: number): Grid {
   g.line(X + 4, by - 2, X + 6 + (p.swipe ? 3 : 0), by - 11, c, 2)
   g.ellipse(X + 7 + (p.swipe ? 3 : 0), by - 13, 3, 3, c)
   g.rect(X + 9 + (p.swipe ? 3 : 0), by - 13, 4, 2, hex('#e8b040')); g.set(X + 7 + (p.swipe ? 3 : 0), by - 14, hex('#140c0a'))
-  return finish(g, p, foot, 'flip')
+  return finish(g, p, foot, 'collapse')
 }
 // --- smocze pisklę (unosi się)
 export function buildWhelp(col: string, anim: CAnim, f: number): Grid {

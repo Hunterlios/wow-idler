@@ -13,29 +13,41 @@ export const PAL: Record<School, [string, string, string, string]> = {
   physical: ['#4a4a4a', '#9a9a9a', '#dcdcdc', '#ffffff'],
 }
 
-export type ProjKind = 'orb' | 'frostbolt' | 'shadow' | 'arcane' | 'arrow' | 'bullet' | 'thrown' | 'wand'
-export type Proj = { kind: ProjKind; school: School; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; crit: boolean; arc: number; trail: { x: number; y: number; life: number }[]; onHit?: () => void }
-export type HitKind = 'burst' | 'slash' | 'beam' | 'bolt' | 'shock' | 'aoe' | 'tick' | 'spark' | 'heal' | 'buff' | 'claw'
-export type Hit = { kind: HitKind; school: School; x: number; y: number; gy: number; life: number; max: number; crit: boolean; seed: number; x0?: number; y0?: number; w?: number }
+export type ProjKind = 'orb' | 'frostbolt' | 'shadow' | 'arcane' | 'arrow' | 'bullet' | 'thrown' | 'wand' | 'hammer' | 'skull'
+export type Proj = { kind: ProjKind; school: School; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; crit: boolean; arc: number; trail: { x: number; y: number; life: number }[]; onHit?: () => void; big?: number; tint?: School }
+export type HitKind = 'burst' | 'slash' | 'beam' | 'bolt' | 'shock' | 'aoe' | 'tick' | 'spark' | 'heal' | 'buff' | 'claw' | 'judgement' | 'nova' | 'shout' | 'channel' | 'swarm' | 'cone' | 'arrows' | 'sparkle'
+export type Hit = { kind: HitKind; school: School; x: number; y: number; gy: number; life: number; max: number; crit: boolean; seed: number; x0?: number; y0?: number; w?: number; drain?: boolean }
 
 const rnd = (n: number) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x) }
 
-// Jakim efektem pokazać czar o danej nazwie
-const BEAM = /smite|holy fire|moonfire|starfire|exorcism|holy wrath|hammer of wrath|insect swarm|mind flay/i
+// Jakim efektem pokazać czar o danej nazwie (sprawdzone dla wszystkich czarów dystansowych każdej klasy)
+const BEAM = /smite|holy fire|moonfire|starfire|exorcism|immolate/i
 const BOLT = /lightning|overload|chain/i
-const SHOCK = /shock|mind blast|shadow word|judgement|seal|earth|flame shock|frost shock|stormstrike|devouring|corruption|curse|immolate|faerie/i
-const AOE = /nova|blizzard|rain of fire|flamestrike|consecration|hellfire|arcane explosion|volley|trap|thunder clap|whirlwind|cleave|blast wave|cone of cold|hurricane|swipe|multi-shot|howl|shout|holy nova/i
+const SHOCK = /shock|mind blast|shadow word|seal|flame shock|frost shock|stormstrike|devouring|corruption|curse|faerie|fire blast|scorch|searing pain|conflagrate|shadowburn|entangl|polymorph|silence|repentance|voice of truth/i
+const NOVA = /nova|hellfire|blast wave|arcane explosion|holy wrath|thunder clap|consecration/i
+const AOE = /blizzard|rain of fire|flamestrike|trap|whirlwind|cleave|hurricane|swipe/i
+const CHANNEL = /drain|mind flay|siphon/i
 
-export function spellLook(name: string | undefined, school: School): { hit: HitKind | null; proj: ProjKind | null } {
+export type Look = { hit: HitKind | null; proj: ProjKind | null; big?: number; at?: 'hero' }
+export function spellLook(name: string | undefined, school: School): Look {
   const n = name ?? ''
+  if (/judgement/i.test(n)) return { hit: 'judgement', proj: null }
+  if (/hammer of wrath|hammer of justice/i.test(n)) return { hit: null, proj: 'hammer' }
+  if (/death coil/i.test(n)) return { hit: null, proj: 'skull' }
+  if (/volley/i.test(n)) return { hit: 'arrows', proj: null }
+  if (/cone of cold/i.test(n)) return { hit: 'cone', proj: null }
+  if (/insect swarm/i.test(n)) return { hit: 'swarm', proj: null }
+  if (CHANNEL.test(n)) return { hit: 'channel', proj: null }
+  if (NOVA.test(n)) return { hit: 'nova', proj: null, at: /consecration|thunder clap/i.test(n) ? undefined : 'hero' }
   if (AOE.test(n)) return { hit: 'aoe', proj: null }
   if (BOLT.test(n) && school === 'nature') return { hit: 'bolt', proj: null }
   if (BEAM.test(n)) return { hit: 'beam', proj: null }
   if (SHOCK.test(n)) return { hit: 'shock', proj: null }
-  if (school === 'frost') return { hit: null, proj: 'frostbolt' }
-  if (school === 'shadow') return { hit: null, proj: 'shadow' }
-  if (school === 'arcane') return { hit: null, proj: 'arcane' }
-  return { hit: null, proj: 'orb' }
+  const big = /pyroblast|soul fire|lava burst|arcane blast/i.test(n) ? 2 : undefined
+  if (school === 'frost') return { hit: null, proj: 'frostbolt', big }
+  if (school === 'shadow') return { hit: null, proj: 'shadow', big }
+  if (school === 'arcane') return { hit: null, proj: 'arcane', big }
+  return { hit: null, proj: 'orb', big }
 }
 
 export class Vfx {
@@ -86,7 +98,7 @@ export class Vfx {
           const j = rnd(tr.x * 0.3 + tr.y) - 0.5
           this.px(c, tr.x - u, tr.y + j * 3 * u, tr.life > 0.6 ? P[2] : tr.life > 0.3 ? P[1] : P[0], u, tr.life > 0.5 ? 2 : 1, 1)
         }
-        const r = (p.kind === 'wand' ? 1 : 2) + big
+        const r = (p.kind === 'wand' ? 1 : 2) + big + (p.big ?? 0)
         const fl = Math.sin(this.t * 40) > 0 ? 1 : 0
         for (let j = -r - 1; j <= r + 1; j++) for (let i = -r - 1; i <= r + 1; i++) {
           const d = Math.hypot(i, j)
@@ -134,6 +146,20 @@ export class Vfx {
         this.px(c, x - dx * (n - 1) * u, y - dy * (n - 1) * u - u, '#ffffff', u) // lotka
         this.px(c, x + dx * u, y + dy * u, '#ffffff', u) // grot
         if (p.crit) for (const tr of p.trail) this.px(c, tr.x, tr.y, `rgba(255,230,120,${tr.life * 0.6})`, u)
+        if (p.tint && p.tint !== 'physical') { const T = PAL[p.tint]; for (const tr of p.trail) { this.px(c, tr.x, tr.y + (rnd(tr.x) - 0.5) * 3 * u, tr.life > 0.5 ? T[2] : T[1], u) } this.pat(c, ['.a.', 'aba', '.a.'], x + dx * u, y + dy * u, u, { a: T[2], b: T[3] }) }
+        return
+      }
+      case 'hammer': {
+        // młot światła: obraca się w locie, zostawia złote iskry
+        for (const tr of p.trail) if (rnd(tr.x * 3) > 0.5) this.px(c, tr.x, tr.y + (rnd(tr.y) - 0.5) * 6 * u, tr.life > 0.5 ? '#fff6c0' : '#e0b030', u)
+        const q = Math.floor(this.t * 16) % 4
+        const H = [['aaa.', 'aaa.', '.b..', '.b..'], ['..aa', 'bbaa', '..aa', '....'], ['..b.', '..b.', '.aaa', '.aaa'], ['....', 'aa..', 'aabb', 'aa..']][q]
+        this.pat(c, H, x, y, u * (p.crit ? 2 : 1.5), { a: '#ffe680', b: '#a07020' })
+        return
+      }
+      case 'skull': {
+        for (const tr of p.trail) this.px(c, tr.x, tr.y + Math.sin(tr.x * 0.2 + this.t * 9) * 2 * u, tr.life > 0.5 ? P[2] : P[0], u)
+        this.pat(c, ['.aaa.', 'abaab', 'aaaaa', '.a.a.'], x, y, u * 1.5, { a: '#e8dcff', b: '#2a0a40' })
         return
       }
       case 'bullet': {
@@ -276,6 +302,104 @@ export class Vfx {
           const ang = f * Math.PI * 4 + this.t * 6
           const y = h.gy - (f * 34 * u) * Math.min(1, k * 2)
           this.px(c, h.x + Math.cos(ang) * 10 * u, y, Math.sin(ang) > 0 ? P[3] : P[1], u)
+        }
+        break
+      }
+      case 'judgement': {
+        // Judgement: młot ze światła spada z nieba na wroga, potem rozbłysk i runiczny krąg
+        const fall = Math.min(1, k / 0.3)
+        const hy = h.gy * 0.05 + (h.y - 6 * u - h.gy * 0.05) * fall
+        c.globalAlpha = Math.min(1, a * 1.4)
+        c.fillStyle = 'rgba(255,230,140,.35)'; c.fillRect(Math.round(h.x - 2 * u), 0, Math.ceil(4 * u), Math.round(hy))
+        if (k < 0.45) this.pat(c, ['.aaaaa.', 'aabbbaa', 'aabbbaa', '..aca..', '...c...', '...c...', '...c...'], h.x, hy - 4 * u, u * (h.crit ? 2 : 1.6), { a: '#ffe680', b: '#fffbe0', c: '#c89a30' })
+        if (k >= 0.3) {
+          const kk = (k - 0.3) / 0.7
+          const R = (6 + kk * 18) * u
+          for (let i = 0; i < 20; i++) { const an = (i / 20) * Math.PI * 2; this.px(c, h.x + Math.cos(an) * R, h.y + Math.sin(an) * R * 0.5, i % 2 ? '#fff6c0' : '#e0b030', u) }
+          for (let i = 0; i < 10; i++) { const an = rnd(h.seed + i) * Math.PI * 2, d = kk * (10 + rnd(h.seed + i * 3) * 12) * u; this.px(c, h.x + Math.cos(an) * d, h.y + Math.sin(an) * d - kk * 6 * u, '#ffffff', u) }
+          // runy na ziemi
+          c.globalAlpha = a * 0.8
+          for (let x = -12; x <= 12; x += 3) this.px(c, h.x + x * u, h.gy - u, (x / 3) % 2 ? '#ffe680' : '#c89a30', u, 2, 1)
+        }
+        break
+      }
+      case 'nova': {
+        // pierścień rozchodzący się po ziemi wokół postaci (Frost Nova, Hellfire, Holy Nova, Arcane Explosion...)
+        const R = (6 + k * 46) * u
+        c.globalAlpha = a
+        for (let i = 0; i < 40; i++) {
+          const an = (i / 40) * Math.PI * 2
+          const x = h.x + Math.cos(an) * R, y = h.gy - 3 * u + Math.sin(an) * R * 0.22
+          this.px(c, x, y - (h.school === 'fire' ? rnd(h.seed + i + Math.floor(this.t * 20)) * 6 * u : 0), i % 3 ? P[2] : P[3], u, 1, h.school === 'frost' ? 3 : 2)
+        }
+        c.globalAlpha = a * 0.25; c.fillStyle = P[1]
+        c.beginPath(); c.ellipse(h.x, h.gy - 3 * u, R, R * 0.22, 0, 0, Math.PI * 2); c.fill()
+        break
+      }
+      case 'shout': {
+        // okrzyk: łuki fali dźwiękowej w stronę wroga
+        c.globalAlpha = a
+        for (let j = 0; j < 3; j++) {
+          const R = (6 + (k * 3 + j) % 3 * 10) * u
+          for (let t = -0.8; t <= 0.8; t += 0.12) this.px(c, h.x + Math.cos(t) * R, h.y + Math.sin(t) * R, j === 0 ? P[3] : P[2], u)
+        }
+        break
+      }
+      case 'channel': {
+        // kanałowany czar: falujący strumień między dłonią a celem; przy wysysaniu cząstki płyną do postaci
+        const x0 = h.x0 ?? h.x, y0 = h.y0 ?? h.y
+        c.globalAlpha = Math.min(1, a * 1.5)
+        const n = 26
+        for (let i = 0; i <= n; i++) {
+          const f = i / n
+          const x = x0 + (h.x - x0) * f, y = y0 + (h.y - y0) * f + Math.sin(f * 12 + this.t * 14) * 2.5 * u * Math.sin(f * Math.PI)
+          this.px(c, x, y, i % 2 ? P[1] : P[2], u)
+        }
+        for (let i = 0; i < 6; i++) {
+          let f = (this.t * 1.6 + i / 6) % 1
+          if (h.drain) f = 1 - f
+          const x = x0 + (h.x - x0) * f, y = y0 + (h.y - y0) * f + Math.sin(f * 12 + this.t * 14) * 2.5 * u * Math.sin(f * Math.PI)
+          this.pat(c, ['.a.', 'aba', '.a.'], x, y, u, { a: h.drain ? '#60ff60' : P[2], b: P[3] })
+        }
+        break
+      }
+      case 'swarm': {
+        c.globalAlpha = a
+        for (let i = 0; i < 14; i++) {
+          const an = this.t * (5 + (i % 4)) + i * 1.3, R = (4 + (i % 5) * 2) * u
+          this.px(c, h.x + Math.cos(an) * R, h.y - 4 * u + Math.sin(an * 1.3) * R * 0.6, i % 3 ? '#2a3a10' : '#9ae050', u)
+        }
+        break
+      }
+      case 'cone': {
+        // stożek mrozu z dłoni w stronę wroga
+        const x0 = h.x0 ?? h.x - 40 * u, y0 = h.y0 ?? h.y
+        c.globalAlpha = a
+        for (let i = 0; i < 30; i++) {
+          const f = ((k * 1.5 + rnd(h.seed + i)) % 1)
+          const spread = (rnd(h.seed + i * 7) - 0.5) * f * 22 * u
+          this.px(c, x0 + (h.x - x0) * f, y0 + (h.y - y0) * f + spread, i % 3 ? P[2] : P[3], u, 1 + (f > 0.6 ? 1 : 0), 1)
+        }
+        break
+      }
+      case 'arrows': {
+        // Volley: deszcz strzał spadających na grupę
+        const W = (h.w ?? 40) * 0.5 + 6 * u
+        c.globalAlpha = a
+        for (let i = 0; i < 12; i++) {
+          const fx = h.x + (rnd(h.seed + i) - 0.5) * 2 * W
+          const fall = (k * 2.2 + rnd(h.seed + i * 5)) % 1
+          const y = h.gy - (1 - fall) * 40 * u
+          for (let j = 0; j < 6; j++) this.px(c, fx - j * u * 0.6, y - j * u, j === 0 ? '#c0c8d0' : j > 4 ? '#ffffff' : '#8a5a2a', u)
+          if (h.school !== 'physical' && fall > 0.85) this.px(c, fx, h.gy - 2 * u, P[2], u, 2, 1)
+        }
+        break
+      }
+      case 'sparkle': {
+        c.globalAlpha = a
+        for (let i = 0; i < 9; i++) {
+          const an = rnd(h.seed + i) * Math.PI * 2, d = (2 + k * 10 + rnd(h.seed + i * 2) * 6) * u
+          this.pat(c, ['.a.', 'aba', '.a.'], h.x + Math.cos(an) * d, h.y + Math.sin(an) * d * 0.7 - k * 4 * u, u, { a: P[2], b: P[3] })
         }
         break
       }

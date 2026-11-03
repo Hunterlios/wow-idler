@@ -112,7 +112,7 @@ export const RACIAL_ICONS: Record<string, string[]> = {
 export const MENU_ICONS: Record<string, string[]> = {
   spell: ['inv_misc_book_09', 'inv_misc_book_11', 'inv_misc_book_07'], talent: ['ability_marksmanship', 'ability_warrior_improveddisciplines'],
   skills: ['ability_dualwield', 'trade_engineering'], quest: ['inv_misc_note_02', 'inv_letter_15'], map: ['inv_misc_map_01', 'inv_misc_spyglass_02', 'inv_misc_spyglass_03'],
-  log: ['inv_misc_book_08', 'inv_scroll_03'],
+  log: ['inv_misc_book_08', 'inv_scroll_03'], gear: ['trade_engineering', 'inv_misc_gear_01'], // złote koło zębate jak w grze
   town: ['inv_misc_rune_01', 'spell_holy_sealofsacrifice'], capital: ['spell_arcane_teleportstormwind', 'spell_arcane_teleportorgrimmar', 'inv_misc_rune_01'],
 }
 

@@ -27,6 +27,10 @@ function sell(s: GameState, idx: number): Res {
 let vendorOpen = false
 export const setVendorOpen = (v: boolean) => { vendorOpen = v }
 export const canSell = (s: GameState) => vendorOpen && s.where !== 'field'
+// prośba o zniszczenie przedmiotu (okno potwierdzenia w App)
+let onDestroy: (src: DragSrc) => void = () => {}
+export const setDestroyHook = (f: (src: DragSrc) => void) => { onDestroy = f }
+export const requestDestroy = (src: DragSrc) => onDestroy(src)
 // po założeniu przedmiotu z torby otwórz okno postaci (widać zmianę od razu)
 let onEquipped: () => void = () => {}
 export const setEquipHook = (f: () => void) => { onEquipped = f }

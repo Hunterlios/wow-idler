@@ -4,7 +4,7 @@ import { raceById } from '../data/races'
 import { subsOf } from './world'
 import { newGame } from './sim'
 import { fixInv, addToInv } from './inventory'
-import { makeQuestItem, makeFood, FOODS } from './items'
+import { makeQuestItem, makeFood, FOODS, GEAR_RESCALE } from './items'
 import { questsFor } from './quests'
 import type { GameState, Item } from './types'
 
@@ -81,6 +81,21 @@ function up09(o: Any): GameState {
     }
   }
   o.v09 = true
+  // 0.9.10: przedmioty dają więcej statystyk — stare przedmioty przeskalowane, żeby nie były gorsze od nowych
+  if (!o.v0910) {
+    const fix = (it: Any) => {
+      if (!it || typeof it !== 'object') return
+      if (it.stats) for (const k of Object.keys(it.stats)) it.stats[k] = Math.max(1, Math.round(it.stats[k] * GEAR_RESCALE))
+      if (it.sp) it.sp = Math.max(1, Math.round(it.sp * GEAR_RESCALE))
+    }
+    for (const it of Object.values(o.hero?.equip ?? {})) fix(it)
+    for (const it of o.hero?.inv ?? []) fix(it)
+    for (const it of o.buyback ?? []) fix(it)
+    for (const q of o.quests ?? []) fix(q.reward)
+    o.v0910 = true
+  }
+  // 0.9.14: zakładanie lepszego ekwipunku tylko przyciskiem w oknie postaci
+  if (!o.v0914) { o.autoEquip = false; o.v0914 = true }
   return o as GameState
 }
 

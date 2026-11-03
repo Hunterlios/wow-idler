@@ -6,6 +6,7 @@ import { formatMoney } from '../game/formulas'
 import { newGame, activePet } from '../game/sim'
 import { Scene } from '../render/scene'
 import { itemIcon } from '../render/icons'
+import { petSprite } from '../render/mobsprites'
 import { RARITY_COLOR, RARITY_PL, SLOT_PL, type Item, type Hero, type EquipSlot } from '../game/types'
 import type { RaceId } from '../data/races'
 import type { ClassId } from '../data/classes'
@@ -153,7 +154,7 @@ export function Hover({ tip, children, className, style, onClick, onContextMenu,
 
 // Slot z ikoną przedmiotu (torby, okno postaci). drag = źródło przeciągania, drop = cel upuszczenia,
 // onRight = prawy przycisk (załóż / zdejmij / sprzedaj / użyj)
-export function ItemSlotBox({ item, hero, empty, onClick, onRight, hint, size = 38, drag, drop, dim }: { item?: Item | null; hero?: Hero; empty?: string; onClick?: () => void; onRight?: () => void; hint?: string; size?: number; drag?: DragSrc; drop?: string; dim?: boolean }) {
+export function ItemSlotBox({ item, hero, empty, onClick, onRight, hint, size = 38, drag, drop, dim }: { item?: Item | null; hero?: Hero; empty?: string; onClick?: () => void; onRight?: (e?: { shiftKey?: boolean }) => void; hint?: string; size?: number; drag?: DragSrc; drop?: string; dim?: boolean }) {
   const unusable = item && hero && item.slot && !canWear(hero, item)
   const md = item ? maxDur(item) : 0
   const wear = item && md ? curDur(item) / md : 1
@@ -175,6 +176,7 @@ export function Portrait({ race, cls, width = 220, height = 120, level, hero }: 
   useEffect(() => {
     const scene = new Scene(ref.current!)
     scene.resize(width, height)
+    scene.still = true // w oknie postaci tylko spokojna animacja, bez akcji z walki
     const s = newGame('', race, cls, 1)
     if (level) s.hero.level = level
     // okno postaci: prawdziwa postać (aktualny ekwipunek, broń dystansowa, pupil)
@@ -301,3 +303,20 @@ class GuardImpl extends Component<{ name: string; onClose?: () => void; children
   }
 }
 export const Guard = GuardImpl as unknown as (p: { name: string; onClose?: () => void; children: ReactNode }) => ReactNode
+
+// Ikona towarzysza: pikselowy sprite narysowany na małym płótnie (bez grafik z gry)
+export function CompanionIcon({ kind, size = 36 }: { kind: 'mule'; size?: number }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const sp = petSprite(kind, 'idle', 0)
+    const ctx = cv.getContext('2d')!
+    ctx.imageSmoothingEnabled = false
+    ctx.fillStyle = '#1a1410'; ctx.fillRect(0, 0, size, size)
+    const w = sp.right - sp.left + 2, hgt = sp.cv.height - sp.top + 1
+    const k = Math.max(1, Math.floor(Math.min(size / w, size / hgt)))
+    ctx.drawImage(sp.cv, sp.left - 1, sp.top, w, hgt, Math.round((size - w * k) / 2), Math.round((size - hgt * k) / 2), w * k, hgt * k)
+  }, [kind, size])
+  return <canvas ref={ref} width={size} height={size} className="comp-icon" />
+}

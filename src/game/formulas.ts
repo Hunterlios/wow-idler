@@ -2,7 +2,7 @@
 import { classById, type Ability, type BuffFx, type Resource, type School } from '../data/classes'
 import { raceById, type Stats } from '../data/races'
 import { talentFx, talentGrants } from '../data/talents'
-import type { Hero } from './types'
+import type { Hero, Item } from './types'
 
 export const MAX_LEVEL = 60
 
@@ -22,8 +22,26 @@ export function mobXp(mobLvl: number, heroLvl: number) {
 
 export const basePower = (l: number) => 9 + 6.5 * l
 
+// Pokrycie ekwipunkiem: każdy slot liczy się wg poziomu przedmiotu względem poziomu postaci
+const GEAR_W: Record<string, number> = { head: 1, neck: 0.6, shoulder: 0.8, back: 0.6, chest: 1, wrist: 0.6, hands: 0.8, waist: 0.7, legs: 1, feet: 0.8, finger: 0.6, trinket: 0.6, mainhand: 1.6, offhand: 0.8, ranged: 0.6 }
+export function gearScore(h: Hero) {
+  let sum = 0, tot = 0
+  const two = h.equip.mainhand?.slot === 'twohand'
+  for (const [slot, w] of Object.entries(GEAR_W)) {
+    const it = (h.equip as Record<string, Item | undefined>)[slot]
+    const ww = slot === 'offhand' && two ? 0 : w
+    tot += ww
+    if (!it || it.dur === 0) continue
+    sum += ww * Math.min(1, (it.ilvl + 2) / Math.max(1, h.level)) * (it.rarity >= 2 ? 1 : 0.8)
+  }
+  if (two) sum += 0.8 * Math.min(1, ((h.equip.mainhand!.ilvl) + 2) / Math.max(1, h.level))
+  return Math.max(0, Math.min(1, sum / Math.max(1, tot)))
+}
+export const MOB_HP_K = 1.15
+export const MOB_DMG_K = 1.35
 export function mobStats(lvl: number) {
-  return { hp: Math.round(30 + 14 * lvl + 0.95 * lvl * lvl), dmg: 1.5 + 1.25 * lvl + 0.022 * lvl * lvl, speed: 2 }
+  // 0.9.10: wrogowie liczeni pod postać w ekwipunku na swój poziom (bez niego walka jest trudna)
+  return { hp: Math.round((30 + 14 * lvl + 0.95 * lvl * lvl) * MOB_HP_K), dmg: (1.5 + 1.25 * lvl + 0.022 * lvl * lvl) * MOB_DMG_K, speed: 2 }
 }
 
 // ---------------------------------------------------------------- dostępne umiejętności
@@ -54,9 +72,24 @@ export function chosenIn(h: Hero, group: string, g = grants(h)): string | null {
 export function groupOk(h: Hero, a: Ability, g = grants(h)) {
   return !a.group || chosenIn(h, a.group, g) === a.id
 }
-// Umiejętność aktywna dla postaci: znana, niewyłączona, w dobrej formie i wybrana w swojej grupie
+// Classic: „Requires Melee Weapon” / „Requires Daggers”. Bez broni te ciosy są nieaktywne (białe ataki pięściami zostają).
+const NEEDS_WEAPON = new Set([
+  'heroic_strike', 'hamstring', 'sunder_armor', 'overpower', 'revenge', 'cleave', 'execute', 'slam', 'whirlwind', 'spearing_strike', 'mortal_strike', 'bloodthirst',
+  'raptor_strike', 'wing_clip', 'mongoose_bite', 'counterattack',
+  'sinister_strike', 'eviscerate', 'riposte', 'ghostly_strike', 'hemorrhage', 'gouge',
+  'holy_strike', 'stormstrike',
+])
+const NEEDS_DAGGER = new Set(['backstab', 'ambush', 'mutilate'])
+export const hasMainWeapon = (h: Hero) => !!h.equip.mainhand && h.equip.mainhand.dur !== 0
+// czego brakuje do użycia umiejętności (null = nic)
+export function weaponNeed(h: Hero, a: Ability): string | null {
+  if (NEEDS_DAGGER.has(a.id)) return h.equip.mainhand?.weaponType === 'Dagger' && hasMainWeapon(h) ? null : 'Requires a Dagger'
+  if (NEEDS_WEAPON.has(a.id) || a.group === 'imbue') return hasMainWeapon(h) ? null : 'Requires a Melee Weapon'
+  return null
+}
+// Umiejętność aktywna dla postaci: znana, niewyłączona, w dobrej formie, z wymaganą bronią i wybrana w swojej grupie
 export function active(h: Hero, a: Ability, g = grants(h)) {
-  return knows(h, a, g) && !h.disabled?.[a.id] && formOk(h, a) && groupOk(h, a, g)
+  return knows(h, a, g) && !h.disabled?.[a.id] && formOk(h, a) && !weaponNeed(h, a) && groupOk(h, a, g)
 }
 export function resourceOf(h: Hero): Resource {
   if (h.cls === 'druid') return h.form === 'bear' ? 'rage' : h.form === 'cat' ? 'energy' : 'mana'
@@ -108,6 +141,7 @@ export type Derived = Stats & {
   weaponDps: number
   weaponSpeed: number
   melee: { dps: number; speed: number; ap: number } // broń do walki wręcz (łowca: ręka główna zamiast łuku)
+  gear: number // 0..1: jak dobrze postać jest ubrana na swój poziom
   spellMult: number // siła rang czarów rosnąca z poziomem (jak bazowe obrażenia kolejnych rang w Classicu)
   sp: number // moc czarów: "+X do obrażeń i leczenia czarami" z przedmiotów i talentów
   haste: number
@@ -137,7 +171,8 @@ export function derive(h: Hero): Derived {
       else m[k] = (m[k] ?? 0) + v
     }
   }
-  for (const { fx, scale } of activeBuffs(h, g)) apply(fx, scale)
+  // talenty wzmacniające buffy (np. Elemental Weapons dla Rockbiter): ten sam klucz ab:<id> co dla obrażeń
+  for (const { a, fx, scale } of activeBuffs(h, g)) apply(fx, scale * (a.kind === 'buff' ? 1 + (tf[`ab:${a.id}`] ?? 0) : 1))
   if (h.wellFed && h.wellFed.left > 0) apply(h.wellFed.fx, 1)
   if ((h.buffs.perception ?? 0) > 0) m.dmg = (m.dmg ?? 0) + 0.1 // Perception (człowiek)
   if (tf.lonewolf && h.cls === 'hunter' && h.disabled?.pet) m.dmg = (m.dmg ?? 0) + tf.lonewolf
@@ -149,7 +184,7 @@ export function derive(h: Hero): Derived {
   s.str += flat.str
   s.agi += flat.agi
   let gearArmor = 0
-  let weaponDps = 1 + 0.35 * L
+  let weaponDps = 1 + 0.12 * L // bez broni: pięści
   let weaponSpeed = c.style === 'ranged' ? 2.8 : 2.4
   let gearSp = 0
   for (const it of Object.values(h.equip)) {
@@ -195,7 +230,9 @@ export function derive(h: Hero): Derived {
   const dodge = 0.03 + s.agi / 20 / 100 + (r.mods.dodge ?? 0) + (m.dodge ?? 0)
   // Czary jak w Classicu: Intellect daje manę i krytyki czarów, a nie moc. Obrażenia rosną z rangą
   // (poziomem) i z mocą czarów z przedmiotów ("+X do obrażeń i leczenia czarami").
-  const spellMult = spellRank(L)
+  // ekwipunek na poziom postaci (0 = nagi, 1 = pełny zestaw na swój poziom): czary i pupile słabną bez niego
+  const gear = gearScore(h)
+  const spellMult = spellRank(L) * (0.6 + 0.4 * gear)
   const sp = Math.round(gearSp + (flat as Record<string, number>).sp + s.int * (tf.intSp ?? 0) + s.spi * (tf.spiSp ?? 0))
   const haste = 1 + (m.haste ?? 0) + ((h.buffs.berserking ?? 0) > 0 ? h.stacks?.berserk ?? 0.15 : 0)
   const stoneform = (h.buffs.stoneform ?? 0) > 0 ? 0.2 : 0
@@ -209,7 +246,7 @@ export function derive(h: Hero): Derived {
     const ok = mh?.dps && mh.dur !== 0
     melee = { dps: ok ? mh!.dps! : 1 + 0.35 * L, speed: ok ? mh!.speed ?? 2.4 : 2.4, ap: Math.max(0, Math.round((s.str + s.agi + L * 2 - 20 + flat.ap) * (1 + (tf.ap ?? 0)))) }
   }
-  return { ...s, melee, maxHp, maxRes, res, ap: Math.max(0, Math.round(ap)), armor, crit, spellCrit, dodge, weaponDps, weaponSpeed, spellMult, sp, haste, m, dr }
+  return { ...s, melee, maxHp, maxRes, res, ap: Math.max(0, Math.round(ap)), armor, crit, spellCrit, dodge, weaponDps, weaponSpeed, spellMult, sp, haste, m, dr, gear }
 }
 
 // Mnożnik obrażeń/leczenia umiejętności z talentów i buffów

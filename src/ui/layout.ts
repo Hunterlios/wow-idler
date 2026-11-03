@@ -6,6 +6,7 @@ export type Layout = {
   frames: Record<string, { dx: number; dy: number }>
   strip: { x: number | null; y: number | null; w: 'full' | number }
   scale: 'auto' | number
+  bagsMerged?: boolean // wszystkie torby w jednym oknie
 }
 const KEY = 'azeroth-idle-ui'
 let L: Layout = { frames: {}, strip: { x: null, y: null, w: 'full' }, scale: 'auto' }
@@ -18,6 +19,8 @@ export function saveLayout(patch: Partial<Layout>) {
   listeners.forEach((f) => f())
 }
 export const onLayout = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f) } }
+// Pasek gry ma stałą szerokość (najwyżej BAR_W px w skali UI); bez zmiany szerokości
+export const BAR_W = 1200
 export function uiScale() {
   if (L.scale !== 'auto') return L.scale
   return Math.max(0.7, Math.min(1, window.innerHeight / 1000))
