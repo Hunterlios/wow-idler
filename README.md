@@ -6,7 +6,7 @@ You create a hero, and from then on the hero walks through the world on their ow
 
 ## Download
 
-**Get the game from the [latest release](../../releases/latest)** and download the `AzerothIdle-x.y.z-win64.zip` file. Do not download the source code (`Source code (zip)`); it is only for development and will not run by itself.
+**Get the game from the [latest release](../../releases/latest)** and download the `AzerothIdle-x.y.z.zip` file. Do not download the source code (`Source code (zip)`); it is only for development and will not run by itself.
 
 Unzip it anywhere and run `Azeroth Idle.exe`. No installation is needed. The release also contains a browser version (`play-in-browser.html`).
 
